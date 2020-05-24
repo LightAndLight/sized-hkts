@@ -1,5 +1,6 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language FlexibleContexts #-}
+{-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
@@ -8,9 +9,12 @@ module Entailment where
 import Bound ((>>>=), Scope, abstract, instantiate1)
 import Bound.Var (Var(..), unvar)
 import Control.Applicative (empty)
+import Control.Lens.Getter (use)
+import Control.Lens.Setter ((.=), over, mapped)
+import Control.Lens.TH (makeLenses)
 import Control.Monad (ap, guard)
-import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.State (MonadState, gets, modify)
+import Control.Monad.Except (MonadError, runExceptT, throwError)
+import Control.Monad.State (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Foldable (asum, foldl')
@@ -23,7 +27,14 @@ import Data.Void (Void, absurd)
 import Data.Word (Word64)
 
 import IR (Constraint(..), Kind)
-import Typecheck (TMeta(..), TypeM, pattern TypeM, unifyType, applyTSubs_Constraint)
+import TCState
+  ( TCState, TMeta(..), emptyTCState, TMeta, pattern TypeM
+  , HasTypeMetas(..), HasKindMetas(..)
+  , freshTMeta
+  , filterTypeSolutions
+  , solveMetas_Constraint
+  )
+import Typecheck (unifyType)
 
 data Size a
   = Lam (Scope () Size a)
@@ -95,33 +106,33 @@ composeSSubs ::
 composeSSubs a b =
   fmap (applySSubs a) b <> a
 
-data EntailState
+data EntailState ty
   = EntailState
-  { entailTypeMeta :: TMeta
-  , entailTypeMetaKinds :: Map TMeta Kind
-  , entailSizeMeta :: SMeta
+  { _entailTCState :: TCState ty
+  , _entailSizeMeta :: SMeta
   }
+makeLenses ''EntailState
 
-emptyEntailState :: EntailState
+instance HasTypeMetas (EntailState ty) (EntailState ty') ty ty' where
+  nextTMeta = entailTCState.nextTMeta
+  tmetaKinds = entailTCState.tmetaKinds
+  tmetaSolutions = entailTCState.tmetaSolutions
+
+instance HasKindMetas (EntailState ty) where
+  nextKMeta = entailTCState.nextKMeta
+  kmetaSolutions = entailTCState.kmetaSolutions
+
+emptyEntailState :: EntailState ty
 emptyEntailState =
   EntailState
-  { entailTypeMeta = TMeta 0
-  , entailTypeMetaKinds = mempty
-  , entailSizeMeta = SMeta 0
+  { _entailTCState = emptyTCState
+  , _entailSizeMeta = SMeta 0
   }
 
-freshTMeta :: MonadState EntailState m => Kind -> m TMeta
-freshTMeta k = do
-  TMeta t <- gets entailTypeMeta
-  modify $
-    \s -> s { entailTypeMeta = TMeta (t+1), entailTypeMetaKinds = Map.insert (TMeta t) k (entailTypeMetaKinds s) }
-  pure $ TMeta t
-
-freshSMeta :: MonadState EntailState m => m SMeta
+freshSMeta :: MonadState (EntailState ty) m => m SMeta
 freshSMeta = do
-  SMeta t <- gets entailSizeMeta
-  modify $
-    \s -> s { entailSizeMeta = SMeta (t+1) }
+  SMeta t <- use entailSizeMeta
+  entailSizeMeta .= SMeta (t+1)
   pure $ SMeta t
 
 withoutMetas :: (ty -> ty') -> Constraint (Either TMeta ty) -> Maybe (Constraint ty')
@@ -132,7 +143,8 @@ data EntailError
   deriving (Eq, Show)
 
 solve ::
-  (MonadState EntailState m, MonadError EntailError m, Ord ty) =>
+  (MonadState (EntailState ty) m, MonadError EntailError m, Ord ty) =>
+  Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -141,58 +153,63 @@ solve ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta sz))
     )
-solve _ _ _ [] = pure ([], mempty)
-solve tyNames kinds theory (c:cs) = do
-  m_res <- runMaybeT $ simplify tyNames kinds theory c
+solve _ _ _ _ [] = pure ([], mempty)
+solve kindScope tyNames kinds theory (c:cs) = do
+  m_res <- runMaybeT $ simplify kindScope tyNames kinds theory c
   case m_res of
     Nothing -> do
-      case withoutMetas (Right . tyNames) (snd c) of
+      c' <- solveMetas_Constraint (snd c)
+      case withoutMetas (Right . tyNames) c' of
         Nothing -> do
-          (cs', sols') <- solve tyNames kinds theory cs
-          pure (c : cs', sols')
-        Just c' -> throwError $ CouldNotDeduce c'
+          (cs', sols') <- solve kindScope tyNames kinds theory cs
+          pure ((fst c, c') : cs', sols')
+        Just c'' -> throwError $ CouldNotDeduce c''
     Just (cs', sols) -> do
-      (cs'', sols') <- solve tyNames kinds theory (cs' <> cs)
+      (cs'', sols') <- solve kindScope tyNames kinds theory (cs' <> cs)
       pure (cs'', composeSSubs sols' sols)
 
 entails ::
-  (MonadState EntailState m, Eq ty) =>
+  (MonadState (EntailState ty) m, Eq ty) =>
+  Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
   (Size (Either SMeta sz), Constraint (Either TMeta ty)) ->
   (SMeta, Constraint (Either TMeta ty)) ->
   MaybeT m
     ( [(SMeta, Constraint (Either TMeta ty))]
-    , Map TMeta (TypeM ty)
     , Map SMeta (Size (Either SMeta sz))
     )
-entails tyNames kinds (antSize, ant) (consVar, cons) =
+entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
   case ant of
     -- antSize : forall (x : k). _
     CForall _ k a -> do
       meta <- freshTMeta k
-      entails tyNames kinds (antSize, unvar (\() -> Left meta) id <$> a) (consVar, cons)
+      entails kindScope tyNames kinds (antSize, unvar (\() -> Left meta) id <$> a) (consVar, cons)
     -- antSize : _ -> _
     CImplies a b -> do
       bvar <- freshSMeta
-      (bAssumes, tsubs, ssubs) <- entails tyNames kinds (Var $ Left bvar, b) (consVar, cons)
+      (bAssumes, ssubs) <- entails kindScope tyNames kinds (Var $ Left bvar, b) (consVar, cons)
       avar <- freshSMeta
       pure
-        ( (avar, applyTSubs_Constraint tsubs a) : bAssumes
-        , tsubs
+        ( (avar, a) : bAssumes
         , composeSSubs (Map.singleton bvar $ antSize .@ Var (Left avar)) ssubs
         )
     -- antSize : Word64
     CSized t ->
       case cons of
-        CSized t' ->
-          case unifyType tyNames kinds (TypeM t') (TypeM t) of
+        CSized t' -> do
+          res <- runExceptT $ unifyType kindScope tyNames kinds (TypeM t') (TypeM t)
+          case res of
             Left{} -> empty
-            Right sub -> pure ([], sub, Map.singleton consVar antSize)
+            Right () -> pure ([], Map.singleton consVar antSize)
         _ -> error "consequent not simple enough"
 
 simplify ::
-  (MonadState EntailState m, MonadError EntailError m, Ord ty) =>
+  ( MonadState (EntailState ty) m
+  , MonadError EntailError m
+  , Ord ty
+  ) =>
+  Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -201,16 +218,20 @@ simplify ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta sz))
     )
-simplify tyNames kinds theory (consVar, cons) =
+simplify kindScope tyNames kinds theory (consVar, cons) =
   case cons of
     CForall n k a -> do
       ameta <- freshSMeta
-      (aAssumes, asubs) <-
+      es <- get
+      ((aAssumes, asubs), es') <-
+        flip runStateT (over (tmetaSolutions.mapped.mapped) F es) $
         simplify
+          kindScope
           (unvar (\() -> n) tyNames)
           (unvar (\() -> k) kinds)
           (mapTy (fmap F) theory)
           (ameta, sequence <$> a)
+      put $ filterTypeSolutions (unvar (\() -> Nothing) Just) es'
       pure
         ( (fmap.fmap) (CForall n k . fmap sequence) aAssumes
         , Map.singleton consVar (fromMaybe (error "ameta not solved") $ Map.lookup ameta asubs)
@@ -218,7 +239,7 @@ simplify tyNames kinds theory (consVar, cons) =
     CImplies a b -> do
       ameta <- freshSMeta
       bmeta <- freshSMeta
-      (bAssumes, bsubs) <- simplify tyNames kinds (insertLocal a ameta theory) (bmeta, b)
+      (bAssumes, bsubs) <- simplify kindScope tyNames kinds (insertLocal a ameta theory) (bmeta, b)
       bAssumes' <- traverse (\assume -> (, assume) <$> freshSMeta) bAssumes
       pure
         ( (\(v, (_, c)) -> (v, c)) <$> bAssumes'
@@ -239,8 +260,10 @@ simplify tyNames kinds theory (consVar, cons) =
     CSized{} -> do
       m_res <-
         runMaybeT . asum $
-          (\(antVar, ant) -> entails tyNames kinds (antVar, ant) (consVar, cons)) <$>
+          (\(antVar, ant) -> entails kindScope tyNames kinds (antVar, ant) (consVar, cons)) <$>
           theoryToList theory
       case m_res of
-        Nothing -> throwError $ CouldNotDeduce ((fmap.fmap) tyNames cons)
-        Just (assumes, _, sub) -> pure (assumes, sub)
+        Nothing -> do
+          cons' <- solveMetas_Constraint cons
+          throwError $ CouldNotDeduce ((fmap.fmap) tyNames cons')
+        Just (assumes, sub) -> pure (assumes, sub)

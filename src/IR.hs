@@ -51,6 +51,13 @@ newtype KMeta = KMeta Int
 data Kind = KType | KArr Kind Kind | KVar KMeta
   deriving (Eq, Ord, Show)
 
+foldKMeta :: Monoid m => (KMeta -> m) -> Kind -> m
+foldKMeta f k =
+  case k of
+    KType -> mempty
+    KArr a b -> foldKMeta f a <> foldKMeta f b
+    KVar a -> f a
+
 data Constraint a
   = CSized (Type a)
   | CForall Text Kind (Constraint (Var () a))

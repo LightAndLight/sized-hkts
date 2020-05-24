@@ -19,8 +19,11 @@ import Entailment
   )
 import qualified Entailment as Size (Size(..), pattern Var)
 import IR (Constraint(..), Kind(..))
+import qualified IR
 import Syntax (Type(..), WordSize(..))
-import Typecheck (TMeta, sizeConstraintFor)
+import qualified Syntax
+import TCState (TMeta)
+import Typecheck (checkFunction, sizeConstraintFor)
 
 main :: IO ()
 main =
@@ -91,12 +94,16 @@ main =
             }
           e_res = flip evalState emptyEntailState . runExceptT $ do
             m <- freshSMeta
-            (,) m <$> simplify absurd absurd theory (m, CSized $ TUInt S64)
+            (,) m <$> simplify mempty absurd absurd theory (m, CSized $ TUInt S64)
         case e_res of
           Left{} -> expectationFailure "expected success, got error"
           Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 64 :: Size (Either SMeta Void))])
       it "solve $ simplify { (64, Sized U64), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> [d0 := 128]" $ do
         let
+          kindScope =
+            [ ("Pair", KArr KType $ KArr KType KType)
+            ]
+
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
@@ -115,8 +122,8 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
-            (assumes', sols') <- solve absurd absurd theory assumes
+              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
+            (assumes', sols') <- solve kindScope absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> expectationFailure $ "expected success, got error: " <> show err
@@ -124,6 +131,10 @@ main =
             Map.lookup d0 sols `shouldBe` Just (Size.Word 128 :: Size (Either SMeta Void))
       it "solve $ simplify { (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> cannot deduce  Sized U64" $ do
         let
+          kindScope =
+            [ ("Pair", KArr KType $ KArr KType KType)
+            ]
+
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
@@ -141,8 +152,8 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
-            (assumes', sols') <- solve absurd absurd theory assumes
+              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
+            (assumes', sols') <- solve kindScope absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> err `shouldBe` CouldNotDeduce (CSized $ TUInt S64)
@@ -166,15 +177,32 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify absurd absurd theory
+              simplify mempty absurd absurd theory
                 ( m
                 , CForall "a" KType $
                   CImplies
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
                     (CSized $ TVar $ B ())
                 )
-            (assumes', sols') <- solve @_ @_ @Void absurd absurd theory assumes
+            (assumes', sols') <- solve @_ @_ @Void mempty absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> err `shouldBe` CouldNotDeduce (CSized $ TVar $ Right "a")
           Right res -> expectationFailure $ "expected error, got success: " <> show res
+    describe "typechecking" $ do
+      it "id<A>(x : A) -> A" $ do
+        let
+          input =
+            Syntax.Function "id" $
+            Syntax.Forall "A" $
+            Syntax.Arg "x" (TVar $ B ()) $
+            Syntax.Done (TVar $ B ()) $
+            Syntax.Var (B ())
+          output =
+            IR.Function "id" $
+            IR.Forall "A" KType $
+            IR.Constraint (CSized $ TVar $ B ()) $
+            IR.Arg "x" (TVar $ B ()) $
+            IR.Done (TVar $ B ()) $
+            IR.Var $ B ()
+        checkFunction mempty mempty input `shouldBe` Right output

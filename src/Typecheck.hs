@@ -1,14 +1,28 @@
+{-# language DeriveFunctor #-}
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
-module Typecheck where
+{-# language TemplateHaskell #-}
+module Typecheck
+  ( sizeConstraintFor
+  , applyTSubs_Constraint
+  , unifyType
+  , TypeError(..)
+  , CheckResult(..), InferResult(..)
+  , checkExpr
+  , inferExpr
+  , checkFunction
+  )
+where
 
 import Bound.Var (Var(..), unvar)
-import Control.Monad.Except (MonadError, ExceptT(..), runExceptT, throwError)
-import Control.Monad.State (MonadState, evalStateT, gets, modify)
-import Data.Foldable (foldl', foldlM)
+import Control.Lens.Setter ((%=), over, mapped)
+import Control.Monad.Except (MonadError, throwError)
+import Control.Monad.State (MonadState, evalStateT, runStateT)
+import Data.Foldable (foldlM, traverse_)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Monoid (Any(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -20,8 +34,18 @@ import Data.Word (Word8, Word16, Word32, Word64)
 
 import Syntax (Type)
 import qualified Syntax
-import IR (KMeta(..), Kind(..), TypeScheme)
+import IR (KMeta(..), Kind(..), TypeScheme, foldKMeta)
 import qualified IR
+import TCState
+  ( TMeta
+  , TypeM, pattern TypeM, unTypeM
+  , TCState, emptyTCState
+  , HasKindMetas, HasTypeMetas
+  , tmetaSolutions, kmetaSolutions
+  , getTMeta, getKMeta, getTMetaKind
+  , freshTMeta, freshKMeta
+  , filterTypeSolutions
+  )
 
 data TypeError
   = MissingKMeta KMeta
@@ -30,81 +54,13 @@ data TypeError
   | OutOfBoundsUnsigned Syntax.WordSize Integer
   | OutOfBoundsSigned Syntax.WordSize Integer
   | TypeMismatch (TypeM Text) (TypeM Text)
-  | Occurs TMeta (TypeM Text)
+  | KindMismatch Kind Kind
+  | TypeOccurs TMeta (TypeM Text)
+  | KindOccurs KMeta Kind
   | Can'tInfer (Syntax.Expr Text)
   | NotInScope Text
-  deriving Show
-
-newtype TMeta = TMeta Int
-  deriving (Eq, Ord, Show)
-
-data TCState
-  = TCState
-  { tcsKindMeta :: KMeta
-  , tcsTypeMeta :: TMeta
-  , tcsTypeMetaKinds :: Map TMeta Kind
-  }
-
-emptyTCState :: TCState
-emptyTCState =
-  TCState
-  { tcsKindMeta = KMeta 0
-  , tcsTypeMeta = TMeta 0
-  , tcsTypeMetaKinds = mempty
-  }
-
-freshKMeta :: MonadState TCState m => m KMeta
-freshKMeta = do
-  KMeta k <- gets tcsKindMeta
-  modify $ \s -> s { tcsKindMeta = KMeta (k+1) }
-  pure $ KMeta k
-
-freshTMeta :: MonadState TCState m => Kind -> m TMeta
-freshTMeta k = do
-  TMeta t <- gets tcsTypeMeta
-  modify $ \s -> s { tcsTypeMeta = TMeta (t+1), tcsTypeMetaKinds = Map.insert (TMeta t) k (tcsTypeMetaKinds s) }
-  pure $ TMeta t
-
-type TypeM = ExceptT TMeta Type
-pattern TypeM :: Type (Either TMeta ty) -> TypeM ty
-pattern TypeM a = ExceptT a
-unTypeM :: TypeM ty -> Type (Either TMeta ty)
-unTypeM = runExceptT
-
-applyTSubs :: Map TMeta (TypeM ty) -> TypeM ty -> TypeM ty
-applyTSubs subs ty =
-  TypeM $
-  unTypeM ty >>=
-  either
-    (\m -> maybe (Syntax.TVar $ Left m) unTypeM $ Map.lookup m subs)
-    (Syntax.TVar . Right)
-
-applyTSubs_Expr ::
-  Map TMeta (TypeM ty) ->
-  IR.Expr (Either TMeta ty) tm ->
-  IR.Expr (Either TMeta ty) tm
-applyTSubs_Expr subs expr =
-  case expr of
-    IR.Var{} -> expr
-    IR.Name{} -> expr
-    IR.Let bindings body ->
-      IR.Let ((fmap.fmap) (applyTSubs_Expr subs) bindings) (applyTSubs_Expr subs body)
-    IR.Inst n tyArgs ->
-      IR.Inst n (unTypeM . applyTSubs subs . TypeM <$> tyArgs)
-    IR.Call f args ->
-      IR.Call (applyTSubs_Expr subs f) (applyTSubs_Expr subs <$> args)
-    IR.UInt8{} -> expr
-    IR.UInt16{} -> expr
-    IR.UInt32{} -> expr
-    IR.UInt64{} -> expr
-    IR.Int8{} -> expr
-    IR.Int16{} -> expr
-    IR.Int32{} -> expr
-    IR.Int64{} -> expr
-    IR.BTrue -> expr
-    IR.BFalse -> expr
-    IR.Deref a -> IR.Deref (applyTSubs_Expr subs a)
-    IR.New a -> IR.New (applyTSubs_Expr subs a)
+  | TNotInScope Text
+  deriving (Eq, Show)
 
 applyTSubs_Constraint ::
   Map TMeta (TypeM ty) ->
@@ -113,38 +69,95 @@ applyTSubs_Constraint ::
 applyTSubs_Constraint subs =
   IR.bindConstraint (either (\m -> maybe (pure $ Left m) unTypeM $ Map.lookup m subs) (pure . Right))
 
-applyKSubs :: Map KMeta Kind -> Kind -> Kind
-applyKSubs subs k =
-  case k of
-    KVar m ->
-      case Map.lookup m subs of
-        Nothing -> k
-        Just k' -> k'
-    KArr a b -> KArr (applyKSubs subs a) (applyKSubs subs b)
-    KType -> KType
+unifyKind ::
+  ( MonadState s m, HasKindMetas s
+  , MonadError TypeError m
+  ) =>
+  Kind ->
+  Kind ->
+  m ()
+unifyKind expected actual =
+  case expected of
+    KVar v | KVar v' <- actual, v == v' -> pure ()
+    KVar v -> solveLeft v actual
+    KArr a b ->
+      case actual of
+        KVar v -> solveRight expected v
+        KArr a' b' -> do
+          unifyKind a a'
+          unifyKind b b'
+        _ -> throwError $ KindMismatch expected actual
+    KType ->
+      case actual of
+        KVar v -> solveRight expected v
+        KType -> pure ()
+        _ -> throwError $ KindMismatch expected actual
+  where
+    solveLeft v k = do
+      m_k' <- getKMeta v
+      case m_k' of
+        Nothing ->
+          if getAny $ foldKMeta (Any . (v ==)) k
+          then throwError $ KindOccurs v k
+          else kmetaSolutions %= Map.insert v k
+        Just k' -> unifyKind k' k
+    solveRight k v = do
+      m_k' <- getKMeta v
+      case m_k' of
+        Nothing ->
+          if getAny $ foldKMeta (Any . (v ==)) k
+          then throwError $ KindOccurs v k
+          else kmetaSolutions %= Map.insert v k
+        Just k' -> unifyKind k k'
 
-composeKSubs ::
-  Map KMeta Kind ->
-  Map KMeta Kind ->
-  Map KMeta Kind
-composeKSubs a b =
-  fmap (applyKSubs a) b <> a
-
-composeTSubs ::
-  Map TMeta (TypeM ty) ->
-  Map TMeta (TypeM ty) ->
-  Map TMeta (TypeM ty)
-composeTSubs a b =
-  fmap (applyTSubs a) b <> a
+inferKind ::
+  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  , MonadError TypeError m
+  ) =>
+  Map Text Kind ->
+  (ty -> Kind) ->
+  TypeM ty ->
+  m Kind
+inferKind kindScope kinds ty =
+  case unTypeM ty of
+    Syntax.TVar (Left m) -> do
+      mk <- getTMetaKind m
+      case mk of
+        Nothing -> error $ "Missing " <> show mk
+        Just k -> pure k
+    Syntax.TVar (Right a) -> pure $ kinds a
+    Syntax.TApp a b -> do
+      aK <- inferKind kindScope kinds (TypeM a)
+      bK <- inferKind kindScope kinds (TypeM b)
+      meta <- freshKMeta
+      let expected = KArr bK (KVar meta)
+      unifyKind expected aK
+      pure $ KVar meta
+    Syntax.TUInt{} -> pure KType
+    Syntax.TInt{} -> pure KType
+    Syntax.TBool -> pure KType
+    Syntax.TPtr -> pure $ KArr KType KType
+    Syntax.TFun{} -> pure $ KArr KType KType
+    Syntax.TName n ->
+      case Map.lookup n kindScope of
+        Nothing -> throwError $ TNotInScope n
+        Just k -> pure k
 
 unifyType ::
-  (MonadError TypeError m, Eq ty) =>
+  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  , MonadError TypeError m
+  , Eq ty
+  ) =>
+  Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
   TypeM ty ->
   TypeM ty ->
-  m (Map TMeta (TypeM ty))
-unifyType tyNames kinds expected actual =
+  m ()
+unifyType kindScope tyNames kinds expected actual = do
+  eKind <- inferKind kindScope kinds expected
+  aKind <- inferKind kindScope kinds actual
+  unifyKind eKind aKind
   case unTypeM expected of
     Syntax.TVar (Left m) -> solveLeft m actual
     Syntax.TVar (Right a) ->
@@ -159,9 +172,8 @@ unifyType tyNames kinds expected actual =
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TApp a' b' -> do
-          sols1 <- unifyType tyNames kinds (TypeM a) (TypeM a')
-          sols2 <- unifyType tyNames kinds (applyTSubs sols1 $ TypeM b) (applyTSubs sols1 $ TypeM b')
-          pure $ composeTSubs sols2 sols1
+          unifyType kindScope tyNames kinds (TypeM a) (TypeM a')
+          unifyType kindScope tyNames kinds (TypeM b) (TypeM b')
         _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
     Syntax.TUInt sz ->
       case unTypeM actual of
@@ -187,9 +199,8 @@ unifyType tyNames kinds expected actual =
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TFun args' | Vector.length args == Vector.length args' ->
-          foldl' composeTSubs mempty <$>
-          traverse
-            (\(a, b) -> unifyType tyNames kinds (TypeM a) (TypeM b))
+          traverse_
+            (\(a, b) -> unifyType kindScope tyNames kinds (TypeM a) (TypeM b))
             (Vector.zip args args')
         _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
     Syntax.TName n ->
@@ -198,38 +209,44 @@ unifyType tyNames kinds expected actual =
         Syntax.TName n' | n == n' -> pure mempty
         _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
   where
-    solveLeft m actual' =
-      case unTypeM actual' of
-        Syntax.TVar (Left m') | m == m' -> pure mempty
-        _ ->
-          if any (either (== m) (const False)) (unTypeM actual')
-          then throwError $ Occurs m (tyNames <$> actual')
-          else pure $ Map.singleton m actual'
-    solveRight expected' m =
-      case unTypeM expected' of
-        Syntax.TVar (Left m') | m == m' -> pure mempty
-        _ ->
-          if any (either (== m) (const False)) (unTypeM expected')
-          then throwError $ Occurs m (tyNames <$> expected')
-          else pure $ Map.singleton m expected'
+    solveLeft m actual' = do
+      m_t <- getTMeta m
+      case m_t of
+        Just t -> unifyType kindScope tyNames kinds t actual'
+        Nothing ->
+          case unTypeM actual' of
+            Syntax.TVar (Left m') | m == m' -> pure mempty
+            _ ->
+              if any (either (== m) (const False)) (unTypeM actual')
+              then throwError $ TypeOccurs m (tyNames <$> actual')
+              else tmetaSolutions %= Map.insert m actual'
+    solveRight expected' m = do
+      m_t <- getTMeta m
+      case m_t of
+        Just t -> unifyType kindScope tyNames kinds expected' t
+        Nothing ->
+          case unTypeM expected' of
+            Syntax.TVar (Left m') | m == m' -> pure mempty
+            _ ->
+              if any (either (== m) (const False)) (unTypeM expected')
+              then throwError $ TypeOccurs m (tyNames <$> expected')
+              else tmetaSolutions %= Map.insert m expected'
 
 data InferResult ty tm
   = InferResult
   { irExpr :: IR.Expr (Either TMeta ty) tm
   , irType :: TypeM ty
   , irConstraints :: Set (IR.Constraint (Either TMeta ty))
-  , irKindSols :: Map KMeta Kind
-  , irTypeSols :: Map TMeta (TypeM ty)
   }
 
 instantiateScheme ::
-  MonadState TCState m =>
+  (MonadState s m, HasTypeMetas s s ty ty) =>
   TypeScheme Void ->
   m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
 instantiateScheme = go (Right . absurd)
   where
     go ::
-      MonadState TCState m =>
+      (MonadState s m, HasTypeMetas s s ty ty) =>
       (x -> Either TMeta ty) ->
       TypeScheme x ->
       m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
@@ -250,7 +267,11 @@ instantiateScheme = go (Right . absurd)
             )
 
 inferExpr ::
-  (MonadState TCState m, MonadError TypeError m, Ord ty) =>
+  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  , MonadError TypeError m
+  , Ord ty
+  ) =>
+  Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
   (ty -> Text) ->
@@ -259,7 +280,7 @@ inferExpr ::
   (tm -> TypeM ty) ->
   Syntax.Expr tm ->
   m (InferResult ty tm)
-inferExpr tyScope letScope tyNames tmNames kinds types expr =
+inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
   case expr of
     Syntax.Var a ->
       pure $
@@ -267,8 +288,6 @@ inferExpr tyScope letScope tyNames tmNames kinds types expr =
       { irExpr = IR.Var a
       , irType = types a
       , irConstraints = mempty
-      , irKindSols = mempty
-      , irTypeSols = mempty
       }
 
     Syntax.Name name -> do
@@ -283,8 +302,6 @@ inferExpr tyScope letScope tyNames tmNames kinds types expr =
                 { irExpr = IR.Inst name $ Syntax.TVar . Left <$> Vector.fromList metas
                 , irType = bodyTy
                 , irConstraints = foldr Set.insert mempty constraints
-                , irKindSols = mempty
-                , irTypeSols = mempty
                 }
         Just ty ->
           pure $
@@ -292,65 +309,55 @@ inferExpr tyScope letScope tyNames tmNames kinds types expr =
             { irExpr = IR.Name name
             , irType = ty
             , irConstraints = mempty
-            , irKindSols = mempty
-            , irTypeSols = mempty
             }
 
     Syntax.Let bindings body -> do
-      (letScope', bindings', constraints, kSols, tSols) <-
+      (letScope', bindings', constraints) <-
         foldlM
-          (\(acc, bs, cs, ksols, tsols) (n, b) -> do
-             bResult <- inferExpr tyScope acc tyNames tmNames kinds types b
+          (\(acc, bs, cs) (n, b) -> do
+             bResult <- inferExpr kindScope tyScope acc tyNames tmNames kinds types b
              pure
                ( Map.insert n (irType bResult) acc
                , Vector.snoc bs (n, irExpr bResult)
                , irConstraints bResult <> cs
-               , composeKSubs (irKindSols bResult) ksols
-               , composeTSubs (irTypeSols bResult) tsols
                )
           )
-          (mempty, mempty, mempty, mempty, mempty)
+          (mempty, mempty, mempty)
           bindings
-      bodyResult <- inferExpr tyScope letScope' tyNames tmNames kinds types body
+      bodyResult <- inferExpr kindScope tyScope letScope' tyNames tmNames kinds types body
       pure $
         InferResult
         { irExpr = IR.Let bindings' $ irExpr bodyResult
         , irType = irType bodyResult
         , irConstraints = irConstraints bodyResult <> constraints
-        , irKindSols = composeKSubs (irKindSols bodyResult) kSols
-        , irTypeSols = composeTSubs (irTypeSols bodyResult) tSols
         }
 
     Syntax.Call fun args -> do
-      funResult <- inferExpr tyScope letScope tyNames tmNames kinds types fun
-      (args', argTys, constraints, ksols, tsols) <-
+      funResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types fun
+      (args', argTys, constraints) <-
         foldlM
-          (\(as, atys, cs, ks, ts) arg -> do
-             argResult <- inferExpr tyScope letScope tyNames tmNames kinds types arg
+          (\(as, atys, cs) arg -> do
+             argResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types arg
              pure
                ( Vector.snoc as $ irExpr argResult
                , Vector.snoc atys . unTypeM $ irType argResult
                , irConstraints argResult <> cs
-               , composeKSubs (irKindSols argResult) ks
-               , composeTSubs (irTypeSols argResult) ts
                )
           )
-          (mempty, mempty, irConstraints funResult, irKindSols funResult, irTypeSols funResult)
+          (mempty, mempty, irConstraints funResult)
           args
       meta <- freshTMeta KType
-      subs <-
-        unifyType
-          tyNames
-          kinds
-          (TypeM $ Syntax.TApp (Syntax.TFun argTys) (Syntax.TVar $ Left meta))
-          (irType funResult)
+      unifyType
+        kindScope
+        tyNames
+        kinds
+        (TypeM $ Syntax.TApp (Syntax.TFun argTys) (Syntax.TVar $ Left meta))
+        (irType funResult)
       pure $
         InferResult
         { irExpr = IR.Call (irExpr funResult) args'
-        , irType = applyTSubs subs (TypeM . Syntax.TVar $ Left meta)
+        , irType = TypeM . Syntax.TVar $ Left meta
         , irConstraints = constraints
-        , irKindSols = ksols
-        , irTypeSols = composeTSubs subs tsols
         }
 
     Syntax.Number{} -> throwError $ Can'tInfer (tmNames <$> expr)
@@ -361,8 +368,6 @@ inferExpr tyScope letScope tyNames tmNames kinds types expr =
       { irExpr = IR.BTrue
       , irType = TypeM Syntax.TBool
       , irConstraints = mempty
-      , irKindSols = mempty
-      , irTypeSols = mempty
       }
 
     Syntax.BFalse ->
@@ -371,52 +376,44 @@ inferExpr tyScope letScope tyNames tmNames kinds types expr =
       { irExpr = IR.BTrue
       , irType = TypeM Syntax.TBool
       , irConstraints = mempty
-      , irKindSols = mempty
-      , irTypeSols = mempty
       }
 
     Syntax.New a -> do
-      aResult <- inferExpr tyScope letScope tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
       pure $
         InferResult
         { irExpr = IR.New $ irExpr aResult
         , irType = TypeM $ Syntax.TApp Syntax.TPtr (unTypeM $ irType aResult)
         , irConstraints = irConstraints aResult
-        , irKindSols = irKindSols aResult
-        , irTypeSols = irTypeSols aResult
         }
 
     Syntax.Deref a -> do
-      aResult <- inferExpr tyScope letScope tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
       meta <- freshTMeta KType
-      subs <-
-        unifyType
-          tyNames
-          kinds
-          (TypeM $ Syntax.TApp Syntax.TPtr $ Syntax.TVar $ Left meta)
-          (irType aResult)
+      unifyType
+        kindScope
+        tyNames
+        kinds
+        (TypeM $ Syntax.TApp Syntax.TPtr $ Syntax.TVar $ Left meta)
+        (irType aResult)
       pure $
         InferResult
-        { irExpr =
-            applyTSubs_Expr subs $
-            IR.Deref (irExpr aResult)
-        , irType =
-            applyTSubs subs $
-            TypeM (Syntax.TVar $ Left meta)
+        { irExpr = IR.Deref $ irExpr aResult
+        , irType = TypeM $ Syntax.TVar (Left meta)
         , irConstraints = irConstraints aResult
-        , irKindSols = irKindSols aResult
-        , irTypeSols = composeTSubs subs (irTypeSols aResult)
         }
 
 data CheckResult ty tm
   = CheckResult
   { crExpr :: IR.Expr (Either TMeta ty) tm
-  , crKindSols :: Map KMeta Kind
-  , crTypeSols :: Map TMeta (TypeM ty)
   }
 
 checkExpr ::
-  (MonadState TCState m, MonadError TypeError m, Ord ty) =>
+  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  , MonadError TypeError m
+  , Ord ty
+  ) =>
+  Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
   (ty -> Text) ->
@@ -426,7 +423,7 @@ checkExpr ::
   Syntax.Expr tm ->
   TypeM ty ->
   m (CheckResult ty tm)
-checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
+checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
   case expr of
     Syntax.Number n ->
       case unTypeM ty of
@@ -438,8 +435,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.UInt8 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsUnsigned sz n
             Syntax.S16 ->
@@ -448,8 +443,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.UInt16 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsUnsigned sz n
             Syntax.S32 ->
@@ -458,8 +451,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.UInt32 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsUnsigned sz n
             Syntax.S64 ->
@@ -468,8 +459,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.UInt64 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsUnsigned sz n
         Syntax.TInt sz ->
@@ -480,8 +469,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.Int8 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsSigned sz n
             Syntax.S16 ->
@@ -490,8 +477,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.Int16 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsSigned sz n
             Syntax.S32 ->
@@ -500,8 +485,6 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.Int32 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsSigned sz n
             Syntax.S64 ->
@@ -510,19 +493,15 @@ checkExpr tyScope letScope tyNames tmNames kinds types expr ty =
                 pure $
                 CheckResult
                 { crExpr = IR.Int64 (fromIntegral n)
-                , crKindSols = mempty
-                , crTypeSols = mempty
                 }
               else throwError $ OutOfBoundsUnsigned sz n
         _ -> throwError $ NotNumeric (tyNames <$> ty)
     _ -> do
-      exprResult <- inferExpr tyScope letScope tyNames tmNames kinds types expr
-      subs <- unifyType tyNames kinds ty (irType exprResult)
+      exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
+      unifyType kindScope tyNames kinds ty (irType exprResult)
       pure $
         CheckResult
-        { crExpr = applyTSubs_Expr subs $ irExpr exprResult
-        , crKindSols = irKindSols exprResult
-        , crTypeSols = composeTSubs subs (irTypeSols exprResult)
+        { crExpr = irExpr exprResult
         }
 
 zonkExprTypes ::
@@ -580,7 +559,11 @@ sizeConstraintFor nn = go nn [] (B ())
         KVar{} -> error "KVar in sizeConstraintFor"
 
 checkFunctionBody ::
-  (MonadState TCState m, MonadError TypeError m, Ord ty) =>
+  ( MonadError TypeError m
+  , Ord ty
+  ) =>
+  TCState ty ->
+  Map Text Kind ->
   Map Text (TypeScheme Void) ->
   (ty -> Text) ->
   (tm -> Text) ->
@@ -590,13 +573,15 @@ checkFunctionBody ::
   (TypeScheme ty -> TypeScheme Void) ->
   Vector (Type ty) ->
   Syntax.FunctionBody ty tm ->
-  m (IR.FunctionBody ty tm, Map KMeta Kind)
-checkFunctionBody tyScope tyNames argNames kinds types name mkScheme args fb =
+  m (IR.FunctionBody ty tm, TCState ty)
+checkFunctionBody tcstate kindScope tyScope tyNames argNames kinds types name mkScheme args fb =
   case fb of
     Syntax.Forall tyName rest -> do
-      meta <- freshKMeta
-      (rest', ksols) <-
+      (meta, tcstate') <- runStateT freshKMeta tcstate
+      (rest', tcstate'') <-
         checkFunctionBody
+          (over (tmetaSolutions.mapped.mapped) F tcstate')
+          kindScope
           tyScope
           (unvar (\() -> tyName) tyNames)
           argNames
@@ -606,58 +591,70 @@ checkFunctionBody tyScope tyNames argNames kinds types name mkScheme args fb =
           (mkScheme . IR.SForall tyName (KVar meta))
           ((fmap.fmap) F args)
           rest
-      case Map.lookup meta ksols of
+      m_k <- evalStateT (getKMeta meta) tcstate''
+      case m_k of
         Nothing -> error $ "unsolved: " <> show meta
         Just k ->
           pure
             ( IR.Forall tyName k $
               IR.Constraint (sizeConstraintFor 0 k) $
               rest'
-            , ksols
+            , filterTypeSolutions (unvar (\() -> Nothing) Just) tcstate''
             )
     Syntax.Arg argName argTy rest -> do
-      (rest', ksols) <-
+      let argTy' = TypeM $ Right <$> argTy
+      ((), tcstate') <-
+        flip runStateT tcstate $ do
+          argTyKind <- inferKind kindScope kinds argTy'
+          unifyKind KType argTyKind
+      (rest', tcstate'') <-
         checkFunctionBody
+          tcstate'
+          kindScope
           tyScope
           tyNames
           (unvar (\() -> argName) argNames)
           kinds
-          (unvar (\() -> TypeM $ Right <$> argTy) types)
+          (unvar (\() -> argTy') types)
           name
           mkScheme
           (Vector.snoc args argTy)
           rest
-      pure (IR.Arg argName argTy rest', ksols)
-    Syntax.Done retTy expr -> do
-      exprResult <-
-        checkExpr
-          (Map.insert name (mkScheme $ IR.SDone mempty args retTy) tyScope) -- for recursive calls
-          mempty
-          tyNames
-          argNames
-          kinds
-          types
-          expr
-          (TypeM $ Right <$> retTy)
-      expr' <- zonkExprTypes (crExpr exprResult)
-      pure (IR.Done retTy expr', crKindSols exprResult)
+      pure (IR.Arg argName argTy rest', tcstate'')
+    Syntax.Done retTy expr ->
+      flip runStateT tcstate $ do
+        exprResult <-
+          checkExpr
+            kindScope
+            (Map.insert name (mkScheme $ IR.SDone mempty args retTy) tyScope) -- for recursive calls
+            mempty
+            tyNames
+            argNames
+            kinds
+            types
+            expr
+            (TypeM $ Right <$> retTy)
+        expr' <- zonkExprTypes (crExpr exprResult)
+        pure (IR.Done retTy expr')
 
 checkFunction ::
   MonadError TypeError m =>
+  Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Syntax.Function ->
   m IR.Function
-checkFunction tyScope (Syntax.Function name body) =
-  flip evalStateT emptyTCState $ do
-    (body', _) <-
-      checkFunctionBody
-        tyScope
-        absurd
-        absurd
-        absurd
-        absurd
-        name
-        id
-        mempty
-        body
-    pure $ IR.Function name body'
+checkFunction kindScope tyScope (Syntax.Function name body) = do
+  (body', _) <-
+    checkFunctionBody
+      emptyTCState
+      kindScope
+      tyScope
+      absurd
+      absurd
+      absurd
+      absurd
+      name
+      id
+      mempty
+      body
+  pure $ IR.Function name body'
