@@ -58,6 +58,13 @@ foldKMeta f k =
     KArr a b -> foldKMeta f a <> foldKMeta f b
     KVar a -> f a
 
+substKMeta :: (KMeta -> Kind) -> Kind -> Kind
+substKMeta f k =
+  case k of
+    KType -> KType
+    KArr a b -> KArr (substKMeta f a) (substKMeta f b)
+    KVar a -> f a
+
 data Constraint a
   = CSized (Type a)
   | CForall Text Kind (Constraint (Var () a))

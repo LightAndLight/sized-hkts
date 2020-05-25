@@ -2,7 +2,6 @@
 {-# language TemplateHaskell #-}
 module Syntax where
 
-import Bound (Scope)
 import Bound.TH (makeBound)
 import Bound.Var (Var)
 import Control.Monad (ap)
@@ -39,7 +38,7 @@ instance Show a => Show (Type a) where; showsPrec = showsPrec1
 
 data Ctors a
   = End
-  | Ctor { ctorName :: Text, ctorArgs :: Vector (Type a) }
+  | Ctor { ctorName :: Text, ctorArgs :: Vector (Type a), ctorRest :: Ctors a }
   deriving (Functor, Foldable, Traversable)
 deriveEq1 ''Ctors
 deriveShow1 ''Ctors
@@ -50,7 +49,7 @@ data ADT
   = ADT
   { adtName :: Text
   , adtArgs :: Vector Text
-  , adtCtors :: Scope Int Ctors Void
+  , adtCtors :: Ctors (Var Int Void)
   } deriving Show
 
 data Expr a

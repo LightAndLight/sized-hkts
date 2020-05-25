@@ -12,19 +12,22 @@ module TCState
   , freshTMeta, freshKMeta
   , getTMeta, getKMeta
   , getTMetaKind
-  , solveKMetas
+  , solveKMetas, solveKMetasMaybe
   , solveTMetas_Expr
   , solveMetas_Constraint
   )
 where
 
 import Bound.Var (Var(..))
+import Control.Applicative (empty)
 import Control.Lens.Getter ((^.), use)
 import Control.Lens.Lens (Lens, Lens')
 import Control.Lens.Setter ((.~), (%=), (.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Control.Monad.State (MonadState)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Foldable (foldl')
 import Data.Function ((&))
 import Data.Map (Map)
@@ -165,6 +168,25 @@ solveTMetas_Type d = go d
         TPtr -> pure TPtr
         TFun ts -> TFun <$> traverse (go depth) ts
         TName n -> pure $ TName n
+
+solveKMetasMaybe ::
+  (MonadState s m, HasKindMetas s) =>
+  IR.Kind ->
+  m (Maybe IR.Kind)
+solveKMetasMaybe = runMaybeT . go
+  where
+    go ::
+      (MonadState s m, HasKindMetas s) =>
+      IR.Kind ->
+      MaybeT m IR.Kind
+    go k =
+      case k of
+        IR.KVar m ->
+          maybe empty go =<<
+          lift (getKMeta m)
+        IR.KArr a b ->
+          IR.KArr <$> go a <*> go b
+        IR.KType -> pure IR.KType
 
 solveKMetas ::
   (MonadState s m, HasKindMetas s) =>

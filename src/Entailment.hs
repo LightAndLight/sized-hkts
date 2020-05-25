@@ -1,8 +1,6 @@
-{-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
-{-# language TemplateHaskell #-}
 {-# language TupleSections #-}
 module Entailment where
 
@@ -16,7 +14,6 @@ import Control.Monad (ap, guard)
 import Control.Monad.Except (MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
-import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Foldable (asum, foldl')
 import Data.Functor.Classes (eq1, showsPrec1)
 import Data.Map (Map)
@@ -27,6 +24,7 @@ import Data.Void (Void, absurd)
 import Data.Word (Word64)
 
 import IR (Constraint(..), Kind)
+import Size(Size(..), pattern Var)
 import TCState
   ( TCState, TMeta(..), emptyTCState, TMeta, pattern TypeM
   , HasTypeMetas(..), HasKindMetas(..)
@@ -35,40 +33,6 @@ import TCState
   , solveMetas_Constraint
   )
 import Typecheck (unifyType)
-
-data Size a
-  = Lam (Scope () Size a)
-  | App a [Size a]
-  | Plus (Size a) (Size a)
-  | Word Word64
-  deriving (Functor, Foldable, Traversable)
-deriveEq1 ''Size
-deriveShow1 ''Size
-instance Eq a => Eq (Size a) where; (==) = eq1
-instance Show a => Show (Size a) where; showsPrec = showsPrec1
-instance Applicative Size where; pure a = App a []; (<*>) = ap
-instance Monad Size where -- probably not lawful, but it's helpful to have everything be 'beta-normal'
-  Lam a >>= f = Lam (a >>>= f)
-  App a bs >>= f = foldl (.@) (f a) ((>>= f) <$> bs)
-  Plus a b >>= f =
-    let
-      a' = a >>= f
-      b' = b >>= f
-    in
-      case (a', b') of
-        (Word m, Word n) -> Word (m + n)
-        _ -> Plus a' b'
-  Word n >>= _ = Word n
-
-pattern Var :: a -> Size a
-pattern Var a = App a []
-
-infixl 5 .@
-(.@) :: Size a -> Size a -> Size a
-(.@) (Lam f) x = instantiate1 x f
-(.@) (App a bs) x = App a (bs ++ [x])
-(.@) Word{} _ = error "applying to Word"
-(.@) Plus{} _ = error "applying to Plus"
 
 data Theory ty
   = Theory

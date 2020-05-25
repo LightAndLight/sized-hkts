@@ -1,7 +1,10 @@
+{-# language BangPatterns #-}
 {-# language DeriveFunctor #-}
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
+{-# language ScopedTypeVariables #-}
 {-# language TemplateHaskell #-}
+{-# language ViewPatterns #-}
 module Typecheck
   ( sizeConstraintFor
   , applyTSubs_Constraint
@@ -14,8 +17,11 @@ module Typecheck
   )
 where
 
+import Bound (Scope, fromScope, toScope)
 import Bound.Var (Var(..), unvar)
+import Control.Applicative ((<|>))
 import Control.Lens.Setter ((%=), over, mapped)
+import Control.Monad (replicateM)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState, evalStateT, runStateT)
 import Data.Foldable (foldlM, traverse_)
@@ -36,6 +42,7 @@ import Syntax (Type)
 import qualified Syntax
 import IR (KMeta(..), Kind(..), TypeScheme, foldKMeta)
 import qualified IR
+import Size (Size(..))
 import TCState
   ( TMeta
   , TypeM, pattern TypeM, unTypeM
@@ -45,6 +52,7 @@ import TCState
   , getTMeta, getKMeta, getTMetaKind
   , freshTMeta, freshKMeta
   , filterTypeSolutions
+  , solveKMetas
   )
 
 data TypeError
@@ -109,6 +117,19 @@ unifyKind expected actual =
           then throwError $ KindOccurs v k
           else kmetaSolutions %= Map.insert v k
         Just k' -> unifyKind k k'
+
+checkKind ::
+  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  , MonadError TypeError m
+  ) =>
+  Map Text Kind ->
+  (ty -> Kind) ->
+  TypeM ty ->
+  Kind ->
+  m ()
+checkKind kindScope kinds ty k = do
+  k' <- inferKind kindScope kinds ty
+  unifyKind k k'
 
 inferKind ::
   ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
@@ -604,9 +625,8 @@ checkFunctionBody tcstate kindScope tyScope tyNames argNames kinds types name mk
     Syntax.Arg argName argTy rest -> do
       let argTy' = TypeM $ Right <$> argTy
       ((), tcstate') <-
-        flip runStateT tcstate $ do
-          argTyKind <- inferKind kindScope kinds argTy'
-          unifyKind KType argTyKind
+        flip runStateT tcstate $
+        checkKind kindScope kinds argTy' KType
       (rest', tcstate'') <-
         checkFunctionBody
           tcstate'
@@ -658,3 +678,105 @@ checkFunction kindScope tyScope (Syntax.Function name body) = do
       mempty
       body
   pure $ IR.Function name body'
+
+makeSizeTerm ::
+  forall sz.
+  (Int -> Maybe sz) ->
+  Vector (Type (Var Int Void)) ->
+  Size sz
+makeSizeTerm sizeVars =
+  foldl (\acc a -> Plus acc (typeSizeTerm a)) (Word 0)
+  where
+    typeSizeTerm :: Type (Var Int Void) -> Size sz
+    typeSizeTerm = _
+
+checkADT ::
+  forall s m.
+  ( MonadState s m
+  , HasTypeMetas s s (Var Int Void) (Var Int Void)
+  , HasKindMetas s
+  , MonadError TypeError m
+  ) =>
+  Map Text Kind ->
+  Text -> -- name
+  Vector Text -> -- type parameters
+  Syntax.Ctors (Var Int Void) -> -- constructors
+  m (Kind, Size Void)
+checkADT kScope datatypeName paramNames ctors = do
+  datatypeKind <- KVar <$> freshKMeta
+  paramMetas <- Vector.replicateM (Vector.length paramNames) freshKMeta
+  sz <-
+    abstractParams
+      (Map.insert datatypeName datatypeKind kScope)
+      paramMetas
+      (const Nothing)
+      id
+      ctors
+      (Vector.toList paramNames)
+  ks <- traverse (solveKMetas . KVar) paramMetas
+  let datatypeKind' = foldr KArr KType ks
+  unifyKind datatypeKind' datatypeKind
+  datatypeKind'' <- solveKMetas datatypeKind'
+  pure (IR.substKMeta (const KType) datatypeKind'', sz)
+  where
+    abstractParams ::
+      Map Text Kind ->
+      Vector KMeta ->
+      (Int -> Maybe sz) ->
+      (Size sz -> Size Void) ->
+      Syntax.Ctors (Var Int Void) -> -- constructors
+      [Text] ->
+      m (Size Void)
+    abstractParams kindScope paramMetas sizeVars mkSize c params =
+      case params of
+        [] ->
+          go
+            kindScope
+            paramMetas
+            0
+            sizeVars
+            mkSize
+            (Word 0)
+            c
+        p:ps ->
+          abstractParams
+            kindScope
+            paramMetas
+            (\ix -> F <$> sizeVars ix <|> Just (B ()))
+            (mkSize . Lam . toScope)
+            c
+            ps
+
+    go ::
+      Map Text Kind ->
+      Vector KMeta ->
+      Int ->
+      (Int -> Maybe sz) ->
+      (Size sz -> Size Void) ->
+      Size sz ->
+      Syntax.Ctors (Var Int Void) -> -- constructors
+      m (Size Void)
+    go kindScope paramMetas !ctorCount sizeVars mkSize sz c =
+      case c of
+        Syntax.End ->
+          if ctorCount > 1
+          then pure $ Plus (Word 8) (mkSize sz)
+          else pure $ mkSize sz
+        Syntax.Ctor ctorName ctorArgs ctorRest -> do
+          traverse_
+            (\ty ->
+               checkKind
+                 kindScope
+                 (unvar (KVar . (paramMetas Vector.!)) absurd)
+                 (TypeM $ Right <$> ty)
+                 KType
+            )
+            ctorArgs
+          go
+            kindScope
+            paramMetas
+            (ctorCount+1)
+            sizeVars
+            mkSize
+            (Max sz (makeSizeTerm sizeVars ctorArgs))
+            ctorRest
