@@ -3,12 +3,23 @@
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
-module Entailment where
+module Check.Entailment
+  ( SMeta(..)
+  , Theory(..), theoryToList, insertLocal, mapTy
+  , EntailState, emptyEntailState
+  , HasSizeMetas(..)
+  , freshSMeta
+  , solve
+  , entails
+  , simplify
+  )
+where
 
 import Bound (abstract)
 import Bound.Var (Var(..), unvar)
 import Control.Applicative (empty)
 import Control.Lens.Getter (use)
+import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((.=), over, mapped)
 import Control.Lens.TH (makeLenses)
 import Control.Monad (guard)
@@ -22,6 +33,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void, absurd)
 
+import Check.TypeError (TypeError(..))
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import TCState
@@ -76,6 +88,9 @@ data EntailState ty
   }
 makeLenses ''EntailState
 
+class HasSizeMetas s where
+  nextSMeta :: Lens' s SMeta
+
 instance HasTypeMetas (EntailState ty) (EntailState ty') ty ty' where
   nextTMeta = entailTCState.nextTMeta
   tmetaKinds = entailTCState.tmetaKinds
@@ -85,6 +100,9 @@ instance HasKindMetas (EntailState ty) where
   nextKMeta = entailTCState.nextKMeta
   kmetaSolutions = entailTCState.kmetaSolutions
 
+instance HasSizeMetas (EntailState ty) where
+  nextSMeta = entailSizeMeta
+
 emptyEntailState :: EntailState ty
 emptyEntailState =
   EntailState
@@ -92,21 +110,17 @@ emptyEntailState =
   , _entailSizeMeta = SMeta 0
   }
 
-freshSMeta :: MonadState (EntailState ty) m => m SMeta
+freshSMeta :: (MonadState s m, HasSizeMetas s) => m SMeta
 freshSMeta = do
-  SMeta t <- use entailSizeMeta
-  entailSizeMeta .= SMeta (t+1)
+  SMeta t <- use nextSMeta
+  nextSMeta .= SMeta (t+1)
   pure $ SMeta t
 
 withoutMetas :: (ty -> ty') -> Constraint (Either TMeta ty) -> Maybe (Constraint ty')
 withoutMetas f = traverse (either (const Nothing) (Just . f))
 
-data EntailError
-  = CouldNotDeduce (Constraint (Either TMeta Text))
-  deriving (Eq, Show)
-
 solve ::
-  (MonadState (EntailState ty) m, MonadError EntailError m, Ord ty) =>
+  (MonadState (EntailState ty) m, MonadError TypeError m, Ord ty) =>
   Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
@@ -169,7 +183,7 @@ entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
 
 simplify ::
   ( MonadState (EntailState ty) m
-  , MonadError EntailError m
+  , MonadError TypeError m
   , Ord ty
   ) =>
   Map Text Kind ->

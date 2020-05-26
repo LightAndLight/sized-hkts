@@ -18,10 +18,10 @@ extra-source-files:  CHANGELOG.md
 
 library
   exposed-modules:     Check.Datatype
+                     , Check.Entailment
                      , Check.Kind
                      , Check.TypeError
                      , Compile
-                     , Entailment
                      , IR
                      , Size
                      , Syntax

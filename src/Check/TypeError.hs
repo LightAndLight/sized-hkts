@@ -2,7 +2,7 @@ module Check.TypeError where
 
 import Data.Text (Text)
 
-import IR (KMeta, Kind)
+import IR (Constraint, KMeta, Kind)
 import Syntax (Expr, WordSize)
 import TCState (TMeta, TypeM)
 
@@ -19,4 +19,5 @@ data TypeError
   | Can'tInfer (Expr Text)
   | NotInScope Text
   | TNotInScope Text
+  | CouldNotDeduce (Constraint (Either TMeta Text))
   deriving (Eq, Show)

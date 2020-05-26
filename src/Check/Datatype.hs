@@ -10,7 +10,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (replicateM)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState, evalStateT, runStateT)
-import Data.Foldable (traverse_)
+import Data.Foldable (foldlM, traverse_)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)
@@ -18,6 +18,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
+import Check.Entailment (HasSizeMetas)
 import Check.Kind (checkKind, unifyKind)
 import Check.TypeError (TypeError)
 import IR (KMeta, Kind(..))
@@ -38,14 +39,21 @@ import TCState
   )
 
 makeSizeTerm ::
-  forall sz.
+  forall s m sz.
+  ( MonadState s m, HasSizeMetas s
+  , MonadError TypeError m
+  ) =>
   (Int -> Maybe sz) ->
   Vector (Type (Var Int Void)) ->
-  Size sz
+  m (Size sz)
 makeSizeTerm sizeVars =
-  foldl (\acc a -> Plus acc (typeSizeTerm a)) (Word 0)
+  foldlM (\acc a -> Plus acc <$> typeSizeTerm a) (Word 0)
   where
-    typeSizeTerm :: Type (Var Int Void) -> Size sz
+    {-
+1. generate a size meta for each parameter to the datatype I'm checking
+2. use them as local assumptions when solving for a concrete size in typeSizeTerm
+    -}
+    typeSizeTerm :: Type (Var Int Void) -> m (Size sz)
     typeSizeTerm t = _
 
 checkADT ::
@@ -53,6 +61,7 @@ checkADT ::
   ( MonadState s m
   , HasTypeMetas s s (Var Int Void) (Var Int Void)
   , HasKindMetas s
+  , HasSizeMetas s
   , MonadError TypeError m
   ) =>
   Map Text Kind ->
@@ -130,11 +139,12 @@ checkADT kScope datatypeName paramNames ctors = do
                   KType
             )
             ctorArgs
+          sz' <- makeSizeTerm sizeVars ctorArgs
           go
             kindScope
             paramMetas
             (ctorCount+1)
             sizeVars
             mkSize
-            (Max sz (makeSizeTerm sizeVars ctorArgs))
+            (Max sz sz')
             ctorRest
