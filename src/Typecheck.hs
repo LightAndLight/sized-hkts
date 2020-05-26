@@ -2,7 +2,6 @@
 {-# language DeriveFunctor #-}
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
-{-# language ScopedTypeVariables #-}
 {-# language TemplateHaskell #-}
 {-# language ViewPatterns #-}
 module Typecheck
@@ -17,18 +16,14 @@ module Typecheck
   )
 where
 
-import Bound (Scope, fromScope, toScope)
 import Bound.Var (Var(..), unvar)
-import Control.Applicative ((<|>))
 import Control.Lens.Setter ((%=), over, mapped)
-import Control.Monad (replicateM)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState, evalStateT, runStateT)
 import Data.Foldable (foldlM, traverse_)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Monoid (Any(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -38,37 +33,22 @@ import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import Data.Word (Word8, Word16, Word32, Word64)
 
+import Check.Kind (checkKind, inferKind, unifyKind)
+import Check.TypeError (TypeError(..))
 import Syntax (Type)
 import qualified Syntax
-import IR (KMeta(..), Kind(..), TypeScheme, foldKMeta)
+import IR (Kind(..), TypeScheme)
 import qualified IR
-import Size (Size(..))
 import TCState
   ( TMeta
   , TypeM, pattern TypeM, unTypeM
   , TCState, emptyTCState
   , HasKindMetas, HasTypeMetas
-  , tmetaSolutions, kmetaSolutions
-  , getTMeta, getKMeta, getTMetaKind
+  , tmetaSolutions
+  , getTMeta, getKMeta
   , freshTMeta, freshKMeta
   , filterTypeSolutions
-  , solveKMetas
   )
-
-data TypeError
-  = MissingKMeta KMeta
-  | MissingTMeta TMeta
-  | NotNumeric (TypeM Text)
-  | OutOfBoundsUnsigned Syntax.WordSize Integer
-  | OutOfBoundsSigned Syntax.WordSize Integer
-  | TypeMismatch (TypeM Text) (TypeM Text)
-  | KindMismatch Kind Kind
-  | TypeOccurs TMeta (TypeM Text)
-  | KindOccurs KMeta Kind
-  | Can'tInfer (Syntax.Expr Text)
-  | NotInScope Text
-  | TNotInScope Text
-  deriving (Eq, Show)
 
 applyTSubs_Constraint ::
   Map TMeta (TypeM ty) ->
@@ -76,93 +56,6 @@ applyTSubs_Constraint ::
   IR.Constraint (Either TMeta ty)
 applyTSubs_Constraint subs =
   IR.bindConstraint (either (\m -> maybe (pure $ Left m) unTypeM $ Map.lookup m subs) (pure . Right))
-
-unifyKind ::
-  ( MonadState s m, HasKindMetas s
-  , MonadError TypeError m
-  ) =>
-  Kind ->
-  Kind ->
-  m ()
-unifyKind expected actual =
-  case expected of
-    KVar v | KVar v' <- actual, v == v' -> pure ()
-    KVar v -> solveLeft v actual
-    KArr a b ->
-      case actual of
-        KVar v -> solveRight expected v
-        KArr a' b' -> do
-          unifyKind a a'
-          unifyKind b b'
-        _ -> throwError $ KindMismatch expected actual
-    KType ->
-      case actual of
-        KVar v -> solveRight expected v
-        KType -> pure ()
-        _ -> throwError $ KindMismatch expected actual
-  where
-    solveLeft v k = do
-      m_k' <- getKMeta v
-      case m_k' of
-        Nothing ->
-          if getAny $ foldKMeta (Any . (v ==)) k
-          then throwError $ KindOccurs v k
-          else kmetaSolutions %= Map.insert v k
-        Just k' -> unifyKind k' k
-    solveRight k v = do
-      m_k' <- getKMeta v
-      case m_k' of
-        Nothing ->
-          if getAny $ foldKMeta (Any . (v ==)) k
-          then throwError $ KindOccurs v k
-          else kmetaSolutions %= Map.insert v k
-        Just k' -> unifyKind k k'
-
-checkKind ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
-  , MonadError TypeError m
-  ) =>
-  Map Text Kind ->
-  (ty -> Kind) ->
-  TypeM ty ->
-  Kind ->
-  m ()
-checkKind kindScope kinds ty k = do
-  k' <- inferKind kindScope kinds ty
-  unifyKind k k'
-
-inferKind ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
-  , MonadError TypeError m
-  ) =>
-  Map Text Kind ->
-  (ty -> Kind) ->
-  TypeM ty ->
-  m Kind
-inferKind kindScope kinds ty =
-  case unTypeM ty of
-    Syntax.TVar (Left m) -> do
-      mk <- getTMetaKind m
-      case mk of
-        Nothing -> error $ "Missing " <> show mk
-        Just k -> pure k
-    Syntax.TVar (Right a) -> pure $ kinds a
-    Syntax.TApp a b -> do
-      aK <- inferKind kindScope kinds (TypeM a)
-      bK <- inferKind kindScope kinds (TypeM b)
-      meta <- freshKMeta
-      let expected = KArr bK (KVar meta)
-      unifyKind expected aK
-      pure $ KVar meta
-    Syntax.TUInt{} -> pure KType
-    Syntax.TInt{} -> pure KType
-    Syntax.TBool -> pure KType
-    Syntax.TPtr -> pure $ KArr KType KType
-    Syntax.TFun{} -> pure $ KArr KType KType
-    Syntax.TName n ->
-      case Map.lookup n kindScope of
-        Nothing -> throwError $ TNotInScope n
-        Just k -> pure k
 
 unifyType ::
   ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
@@ -678,105 +571,3 @@ checkFunction kindScope tyScope (Syntax.Function name body) = do
       mempty
       body
   pure $ IR.Function name body'
-
-makeSizeTerm ::
-  forall sz.
-  (Int -> Maybe sz) ->
-  Vector (Type (Var Int Void)) ->
-  Size sz
-makeSizeTerm sizeVars =
-  foldl (\acc a -> Plus acc (typeSizeTerm a)) (Word 0)
-  where
-    typeSizeTerm :: Type (Var Int Void) -> Size sz
-    typeSizeTerm = _
-
-checkADT ::
-  forall s m.
-  ( MonadState s m
-  , HasTypeMetas s s (Var Int Void) (Var Int Void)
-  , HasKindMetas s
-  , MonadError TypeError m
-  ) =>
-  Map Text Kind ->
-  Text -> -- name
-  Vector Text -> -- type parameters
-  Syntax.Ctors (Var Int Void) -> -- constructors
-  m (Kind, Size Void)
-checkADT kScope datatypeName paramNames ctors = do
-  datatypeKind <- KVar <$> freshKMeta
-  paramMetas <- Vector.replicateM (Vector.length paramNames) freshKMeta
-  sz <-
-    abstractParams
-      (Map.insert datatypeName datatypeKind kScope)
-      paramMetas
-      (const Nothing)
-      id
-      ctors
-      (Vector.toList paramNames)
-  ks <- traverse (solveKMetas . KVar) paramMetas
-  let datatypeKind' = foldr KArr KType ks
-  unifyKind datatypeKind' datatypeKind
-  datatypeKind'' <- solveKMetas datatypeKind'
-  pure (IR.substKMeta (const KType) datatypeKind'', sz)
-  where
-    abstractParams ::
-      Map Text Kind ->
-      Vector KMeta ->
-      (Int -> Maybe sz) ->
-      (Size sz -> Size Void) ->
-      Syntax.Ctors (Var Int Void) -> -- constructors
-      [Text] ->
-      m (Size Void)
-    abstractParams kindScope paramMetas sizeVars mkSize c params =
-      case params of
-        [] ->
-          go
-            kindScope
-            paramMetas
-            0
-            sizeVars
-            mkSize
-            (Word 0)
-            c
-        p:ps ->
-          abstractParams
-            kindScope
-            paramMetas
-            (\ix -> F <$> sizeVars ix <|> Just (B ()))
-            (mkSize . Lam . toScope)
-            c
-            ps
-
-    go ::
-      Map Text Kind ->
-      Vector KMeta ->
-      Int ->
-      (Int -> Maybe sz) ->
-      (Size sz -> Size Void) ->
-      Size sz ->
-      Syntax.Ctors (Var Int Void) -> -- constructors
-      m (Size Void)
-    go kindScope paramMetas !ctorCount sizeVars mkSize sz c =
-      case c of
-        Syntax.End ->
-          if ctorCount > 1
-          then pure $ Plus (Word 8) (mkSize sz)
-          else pure $ mkSize sz
-        Syntax.Ctor ctorName ctorArgs ctorRest -> do
-          traverse_
-            (\ty ->
-               checkKind
-                 kindScope
-                 (unvar (KVar . (paramMetas Vector.!)) absurd)
-                 (TypeM $ Right <$> ty)
-                 KType
-            )
-            ctorArgs
-          go
-            kindScope
-            paramMetas
-            (ctorCount+1)
-            sizeVars
-            mkSize
-            (Max sz (makeSizeTerm sizeVars ctorArgs))
-            ctorRest

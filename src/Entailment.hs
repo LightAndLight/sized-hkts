@@ -1,30 +1,29 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
+{-# language TemplateHaskell #-}
 {-# language TupleSections #-}
 module Entailment where
 
-import Bound ((>>>=), Scope, abstract, instantiate1)
+import Bound (abstract)
 import Bound.Var (Var(..), unvar)
 import Control.Applicative (empty)
 import Control.Lens.Getter (use)
 import Control.Lens.Setter ((.=), over, mapped)
 import Control.Lens.TH (makeLenses)
-import Control.Monad (ap, guard)
+import Control.Monad (guard)
 import Control.Monad.Except (MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Foldable (asum, foldl')
-import Data.Functor.Classes (eq1, showsPrec1)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void, absurd)
-import Data.Word (Word64)
 
 import IR (Constraint(..), Kind)
-import Size(Size(..), pattern Var)
+import Size((.@), Size(..), pattern Var)
 import TCState
   ( TCState, TMeta(..), emptyTCState, TMeta, pattern TypeM
   , HasTypeMetas(..), HasKindMetas(..)

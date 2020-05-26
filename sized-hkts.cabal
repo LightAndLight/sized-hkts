@@ -17,7 +17,16 @@ category:            Language
 extra-source-files:  CHANGELOG.md
 
 library
-  exposed-modules:     Compile, Entailment, IR, Size, Syntax, TCState, Typecheck
+  exposed-modules:     Check.Datatype
+                     , Check.Kind
+                     , Check.TypeError
+                     , Compile
+                     , Entailment
+                     , IR
+                     , Size
+                     , Syntax
+                     , TCState
+                     , Typecheck
   build-depends:       base ^>=4.12.0.0
                      , bifunctors
                      , bound
