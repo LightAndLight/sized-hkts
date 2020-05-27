@@ -3,9 +3,11 @@
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
+{-# options_ghc -fno-warn-unused-top-binds #-}
 module Check.Entailment
   ( SMeta(..)
   , Theory(..), theoryToList, insertLocal, mapTy
+  , HasGlobalTheory(..)
   , EntailState, emptyEntailState
   , HasSizeMetas(..)
   , freshSMeta
@@ -45,11 +47,15 @@ import TCState
   )
 import Typecheck (unifyType)
 
+newtype SMeta = SMeta Int
+  deriving (Eq, Ord, Show)
+
 data Theory ty
   = Theory
-  { thGlobal :: Map (Constraint Void) (Size Void)
-  , thLocal :: Map (Constraint ty) SMeta
+  { _thGlobal :: Map (Constraint Void) (Size Void)
+  , _thLocal :: Map (Constraint ty) SMeta
   }
+makeLenses ''Theory
 
 theoryToList :: Theory ty -> [(Size (Either SMeta sz), Constraint ty)]
 theoryToList (Theory gbl lcl) =
@@ -58,14 +64,17 @@ theoryToList (Theory gbl lcl) =
     (Map.foldrWithKey (\c s -> (:) (absurd <$> s, absurd <$> c)) [] gbl)
     lcl
 
+class HasGlobalTheory s where
+  globalTheory :: Lens' s (Map (Constraint Void) (Size Void))
+
+instance HasGlobalTheory (Theory ty) where
+  globalTheory = thGlobal
+
 insertLocal :: Ord ty => Constraint ty -> SMeta -> Theory ty -> Theory ty
 insertLocal k v (Theory gbl lcl) = Theory gbl (Map.insert k v lcl)
 
 mapTy :: Ord ty' => (ty -> ty') -> Theory ty -> Theory ty'
 mapTy f (Theory gbl lcl) = Theory gbl (Map.mapKeys (fmap f) lcl)
-
-newtype SMeta = SMeta Int
-  deriving (Eq, Ord, Show)
 
 applySSubs ::
   Map SMeta (Size (Either SMeta sz)) ->

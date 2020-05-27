@@ -4,10 +4,11 @@
 {-# language ScopedTypeVariables #-}
 module Check.Datatype where
 
-import Bound (Scope, fromScope, toScope)
+import Bound (Scope, abstract, fromScope, toScope)
 import Bound.Var (Var(..), unvar)
 import Control.Applicative ((<|>))
-import Control.Monad (replicateM)
+import Control.Lens.Getter (use)
+import Control.Monad ((<=<), guard, replicateM)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState, evalStateT, runStateT)
 import Data.Foldable (foldlM, traverse_)
@@ -18,7 +19,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.Entailment (HasSizeMetas)
+import Check.Entailment (HasGlobalTheory, HasSizeMetas, SMeta, Theory(..), freshSMeta, globalTheory)
 import Check.Kind (checkKind, unifyKind)
 import Check.TypeError (TypeError)
 import IR (KMeta, Kind(..))
@@ -40,21 +41,21 @@ import TCState
 
 makeSizeTerm ::
   forall s m sz.
-  ( MonadState s m, HasSizeMetas s
+  ( MonadState s m, HasSizeMetas s, HasGlobalTheory s
   , MonadError TypeError m
   ) =>
-  (Int -> Maybe sz) ->
+  Vector SMeta ->
   Vector (Type (Var Int Void)) ->
-  m (Size sz)
+  m (Size (Either SMeta sz))
 makeSizeTerm sizeVars =
   foldlM (\acc a -> Plus acc <$> typeSizeTerm a) (Word 0)
   where
-    {-
-1. generate a size meta for each parameter to the datatype I'm checking
-2. use them as local assumptions when solving for a concrete size in typeSizeTerm
-    -}
-    typeSizeTerm :: Type (Var Int Void) -> m (Size sz)
-    typeSizeTerm t = _
+    typeSizeTerm :: Type (Var Int Void) -> m (Size (Either SMeta sz))
+    typeSizeTerm t = do
+      global <- use globalTheory
+      let theory = Theory { _thGlobal = global, _thLocal = _ sizeVars }
+      (assumes, subs) <- solve kindScope tyNames kinds theory (_ t)
+      _
 
 checkADT ::
   forall s m.
@@ -72,63 +73,35 @@ checkADT ::
 checkADT kScope datatypeName paramNames ctors = do
   datatypeKind <- KVar <$> freshKMeta
   paramMetas <- Vector.replicateM (Vector.length paramNames) freshKMeta
+  sizeMetas <- Vector.replicateM (Vector.length paramNames) freshSMeta
   sz <-
-    abstractParams
+    go
       (Map.insert datatypeName datatypeKind kScope)
       paramMetas
-      (const Nothing)
-      id
+      sizeMetas
+      0
+      (Word 0)
       ctors
-      (Vector.toList paramNames)
   ks <- traverse (solveKMetas . KVar) paramMetas
   let datatypeKind' = foldr KArr KType ks
   unifyKind datatypeKind' datatypeKind
   datatypeKind'' <- solveKMetas datatypeKind'
-  pure (IR.substKMeta (const KType) datatypeKind'', sz)
+  pure (IR.substKMeta (const KType) datatypeKind'', _ sizeMetas sz)
   where
-    abstractParams ::
-      Map Text Kind ->
-      Vector KMeta ->
-      (Int -> Maybe sz) ->
-      (Size sz -> Size Void) ->
-      Syntax.Ctors (Var Int Void) -> -- constructors
-      [Text] ->
-      m (Size Void)
-    abstractParams kindScope paramMetas sizeVars mkSize c params =
-      case params of
-        [] ->
-          go
-            kindScope
-            paramMetas
-            0
-            sizeVars
-            mkSize
-            (Word 0)
-            c
-        p:ps ->
-          abstractParams
-            kindScope
-            paramMetas
-            (\ix -> F <$> sizeVars ix <|> Just (B ()))
-            (mkSize . Lam . toScope)
-            c
-            ps
-
     go ::
       Map Text Kind ->
       Vector KMeta ->
+      Vector SMeta ->
       Int ->
-      (Int -> Maybe sz) ->
-      (Size sz -> Size Void) ->
-      Size sz ->
+      Size (Either SMeta sz) ->
       Syntax.Ctors (Var Int Void) -> -- constructors
-      m (Size Void)
-    go kindScope paramMetas !ctorCount sizeVars mkSize sz c =
+      m (Size (Either SMeta sz))
+    go kindScope paramMetas sizeMetas !ctorCount sz c =
       case c of
         Syntax.End ->
           if ctorCount > 1
-          then pure $ Plus (Word 8) (mkSize sz)
-          else pure $ mkSize sz
+          then pure $ Plus (Word 8) sz
+          else pure sz
         Syntax.Ctor ctorName ctorArgs ctorRest -> do
           traverse_
             (\ty ->
@@ -139,12 +112,11 @@ checkADT kScope datatypeName paramNames ctors = do
                   KType
             )
             ctorArgs
-          sz' <- makeSizeTerm sizeVars ctorArgs
+          sz' <- makeSizeTerm sizeMetas ctorArgs
           go
             kindScope
             paramMetas
+            sizeMetas
             (ctorCount+1)
-            sizeVars
-            mkSize
             (Max sz sz')
             ctorRest
