@@ -3,14 +3,16 @@
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
+{-# language QuantifiedConstraints #-}
 {-# options_ghc -fno-warn-unused-top-binds #-}
 module Check.Entailment
-  ( SMeta(..)
+  ( SMeta(..), composeSSubs
   , Theory(..), theoryToList, insertLocal, mapTy
   , HasGlobalTheory(..)
   , EntailState, emptyEntailState
   , HasSizeMetas(..)
   , freshSMeta
+  , findSMeta
   , solve
   , entails
   , simplify
@@ -83,6 +85,15 @@ applySSubs ::
 applySSubs subs s =
   s >>= either (\m -> fromMaybe (Var $ Left m) $ Map.lookup m subs) (Var . Right)
 
+findSMeta ::
+  Map SMeta (Size (Either SMeta sz)) ->
+  SMeta ->
+  Size (Either SMeta sz)
+findSMeta s m =
+  case Map.lookup m s of
+    Nothing -> Var $ Left m
+    Just term -> term >>= either (findSMeta s) (Var . Right)
+
 composeSSubs ::
   Map SMeta (Size (Either SMeta sz)) ->
   Map SMeta (Size (Either SMeta sz)) ->
@@ -94,13 +105,17 @@ data EntailState ty
   = EntailState
   { _entailTCState :: TCState ty
   , _entailSizeMeta :: SMeta
+  , _entailGlobalTheory :: Map (Constraint Void) (Size Void)
   }
 makeLenses ''EntailState
+
+instance HasGlobalTheory (EntailState ty) where
+  globalTheory = entailGlobalTheory
 
 class HasSizeMetas s where
   nextSMeta :: Lens' s SMeta
 
-instance HasTypeMetas (EntailState ty) (EntailState ty') ty ty' where
+instance HasTypeMetas EntailState where
   nextTMeta = entailTCState.nextTMeta
   tmetaKinds = entailTCState.tmetaKinds
   tmetaSolutions = entailTCState.tmetaSolutions
@@ -117,6 +132,7 @@ emptyEntailState =
   EntailState
   { _entailTCState = emptyTCState
   , _entailSizeMeta = SMeta 0
+  , _entailGlobalTheory = mempty
   }
 
 freshSMeta :: (MonadState s m, HasSizeMetas s) => m SMeta
@@ -129,7 +145,12 @@ withoutMetas :: (ty -> ty') -> Constraint (Either TMeta ty) -> Maybe (Constraint
 withoutMetas f = traverse (either (const Nothing) (Just . f))
 
 solve ::
-  (MonadState (EntailState ty) m, MonadError TypeError m, Ord ty) =>
+  ( MonadState (s ty) m
+  , HasTypeMetas s
+  , forall x. HasKindMetas (s x), forall x. HasSizeMetas (s x)
+  , MonadError TypeError m
+  , Ord ty
+  ) =>
   Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
@@ -137,7 +158,7 @@ solve ::
   [(SMeta, Constraint (Either TMeta ty))] ->
   m
     ( [(SMeta, Constraint (Either TMeta ty))]
-    , Map SMeta (Size (Either SMeta sz))
+    , Map SMeta (Size (Either SMeta Void))
     )
 solve _ _ _ _ [] = pure ([], mempty)
 solve kindScope tyNames kinds theory (c:cs) = do
@@ -155,7 +176,9 @@ solve kindScope tyNames kinds theory (c:cs) = do
       pure (cs'', composeSSubs sols' sols)
 
 entails ::
-  (MonadState (EntailState ty) m, Eq ty) =>
+  ( MonadState (s ty) m, HasKindMetas (s ty), HasTypeMetas s, HasSizeMetas (s ty)
+  , Eq ty
+  ) =>
   Map Text Kind ->
   (ty -> Text) ->
   (ty -> Kind) ->
@@ -191,7 +214,9 @@ entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
         _ -> error "consequent not simple enough"
 
 simplify ::
-  ( MonadState (EntailState ty) m
+  ( MonadState (s ty) m
+  , HasTypeMetas s
+  , forall x. HasKindMetas (s x), forall x. HasSizeMetas (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>

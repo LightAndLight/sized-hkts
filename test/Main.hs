@@ -6,18 +6,21 @@ module Main where
 import Bound.Scope (toScope)
 import Bound.Var (Var(..))
 import Control.Monad.Except (runExceptT)
-import Control.Monad.State (evalState)
+import Control.Monad.State (evalState, evalStateT)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Void (Void, absurd)
 import Test.Hspec
 
-import Entailment
-  ( EntailError(..), Size, SMeta(..), Theory(..)
+import Check.Datatype (checkADT)
+import Check.Entailment
+  ( SMeta(..), Theory(..)
   , composeSSubs, emptyEntailState, freshSMeta, simplify, solve
   )
-import qualified Entailment as Size (Size(..), pattern Var)
+import Check.TypeError (TypeError(..))
+import Size ((.@), Size)
+import qualified Size (Size(..), pattern Var)
 import IR (Constraint(..), Kind(..))
 import qualified IR
 import Syntax (Type(..), WordSize(..))
@@ -87,10 +90,10 @@ main =
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
-            { thGlobal =
+            { _thGlobal =
               [ (CSized $ TUInt S64, Size.Word 64)
               ]
-            , thLocal = mempty
+            , _thLocal = mempty
             }
           e_res = flip evalState emptyEntailState . runExceptT $ do
             m <- freshSMeta
@@ -107,7 +110,7 @@ main =
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
-            { thGlobal =
+            { _thGlobal =
               [ (CSized $ TUInt S64, Size.Word 64)
               , ( CForall "a" KType $
                   CImplies
@@ -116,7 +119,7 @@ main =
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
-            , thLocal = mempty
+            , _thLocal = mempty
             }
           e_res = flip evalState emptyEntailState . runExceptT $ do
             m <- freshSMeta
@@ -138,7 +141,7 @@ main =
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
-            { thGlobal =
+            { _thGlobal =
               [ ( CForall "a" KType $
                   CImplies
                     (CSized $ TVar $ B ())
@@ -146,7 +149,7 @@ main =
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
-            , thLocal = mempty
+            , _thLocal = mempty
             }
           e_res = flip evalState emptyEntailState . runExceptT $ do
             m <- freshSMeta
@@ -163,7 +166,7 @@ main =
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
-            { thGlobal =
+            { _thGlobal =
               [ ( CForall "x" KType $
                   CImplies
                     (CSized $ TVar $ B ())
@@ -171,7 +174,7 @@ main =
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
-            , thLocal = mempty
+            , _thLocal = mempty
             }
           e_res = flip evalState emptyEntailState . runExceptT $ do
             m <- freshSMeta
@@ -184,7 +187,7 @@ main =
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
                     (CSized $ TVar $ B ())
                 )
-            (assumes', sols') <- solve @_ @_ @Void mempty absurd absurd theory assumes
+            (assumes', sols') <- solve @_ @Void mempty absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> err `shouldBe` CouldNotDeduce (CSized $ TVar $ Right "a")
@@ -206,3 +209,66 @@ main =
             IR.Done (TVar $ B ()) $
             IR.Var $ B ()
         checkFunction mempty mempty input `shouldBe` Right output
+      it "check `struct Pair<A, B>(A, B)`" $ do
+        let
+          result =
+            flip evalStateT emptyEntailState $
+            checkADT
+              mempty
+              "Pair"
+              ["A", "B"]
+              (Syntax.Ctor "Pair" [Syntax.TVar $ B 0, Syntax.TVar $ B 1] Syntax.End)
+
+        result `shouldBe`
+          Right
+            ( KArr KType $ KArr KType KType
+            , Size.Lam $ toScope $
+              Size.Lam $ toScope $
+              Size.Plus (Size.Var $ F $ B ()) (Size.Var $ B ())
+            )
+      it "check `struct Pair<F, A, B>(F<A>, F<B>)`" $ do
+        let
+          result =
+            flip evalStateT emptyEntailState $
+            checkADT
+              mempty
+              "Pair"
+              ["F", "A", "B"]
+              (Syntax.Ctor
+                 "Pair"
+                 [ Syntax.TApp (Syntax.TVar $ B 0) (Syntax.TVar $ B 1)
+                 , Syntax.TApp (Syntax.TVar $ B 0) (Syntax.TVar $ B 2)
+                 ]
+                 Syntax.End
+              )
+
+        result `shouldBe`
+          Right
+            ( KArr (KArr KType KType) $ KArr KType $ KArr KType KType
+            , Size.Lam $ toScope $
+              Size.Lam $ toScope $
+              Size.Lam $ toScope $
+              Size.Plus
+                (Size.Var (F $ F $ B ()) .@ Size.Var (F $ B ()))
+                (Size.Var (F $ F $ B ()) .@ Size.Var (B ()))
+            )
+      it "check `struct Sum<A, B>{ Left(A), Right(B) }`" $ do
+        let
+          result =
+            flip evalStateT emptyEntailState $
+            checkADT
+              mempty
+              "Sum"
+              ["A", "B"]
+              (Syntax.Ctor "Left" [Syntax.TVar $ B 0] $
+               Syntax.Ctor "Right" [Syntax.TVar $ B 1] $
+               Syntax.End)
+
+        result `shouldBe`
+          Right
+            ( KArr KType $ KArr KType KType
+            , Size.Lam $ toScope $
+              Size.Lam $ toScope $
+              Size.Plus (Size.Word 8) $
+              Size.Max (Size.Var $ F $ B ()) (Size.Var $ B ())
+            )

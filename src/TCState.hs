@@ -69,12 +69,12 @@ emptyTCState =
   , _tcsTypeSolutions = mempty
   }
 
-class HasTypeMetas s t ty ty' | s -> ty, t -> ty', s ty' -> t, t ty -> ty' where
-  nextTMeta :: (s ~ t) => Lens s t TMeta TMeta
-  tmetaKinds :: (s ~ t) => Lens s t (Map TMeta Kind) (Map TMeta Kind)
-  tmetaSolutions :: Lens s t (Map TMeta (TypeM ty)) (Map TMeta (TypeM ty'))
+class HasTypeMetas s where
+  nextTMeta :: Lens' (s ty) TMeta
+  tmetaKinds :: Lens' (s ty) (Map TMeta Kind)
+  tmetaSolutions :: Lens (s ty) (s ty') (Map TMeta (TypeM ty)) (Map TMeta (TypeM ty'))
 
-instance HasTypeMetas (TCState ty) (TCState ty') ty ty' where
+instance HasTypeMetas TCState where
   nextTMeta = tcsTypeMeta
   tmetaKinds = tcsTypeMetaKinds
   tmetaSolutions = tcsTypeSolutions
@@ -87,7 +87,7 @@ instance HasKindMetas (TCState ty) where
   nextKMeta = tcsKindMeta
   kmetaSolutions = tcsKindSolutions
 
-filterTypeSolutions :: (HasTypeMetas s s a a, HasTypeMetas s t a b) => (a -> Maybe b) -> s -> t
+filterTypeSolutions :: HasTypeMetas s => (ty -> Maybe ty') -> s ty -> s ty'
 filterTypeSolutions f tcs =
   let
     (tmetas, sols') =
@@ -111,7 +111,7 @@ freshKMeta = do
   nextKMeta .= KMeta (k+1)
   pure $ KMeta k
 
-freshTMeta :: (MonadState s m, HasTypeMetas s s ty ty) => Kind -> m TMeta
+freshTMeta :: (MonadState (s ty) m, HasTypeMetas s) => Kind -> m TMeta
 freshTMeta k = do
   TMeta t <- use nextTMeta
   nextTMeta .= TMeta (t+1)
@@ -127,27 +127,27 @@ getKMeta v = do
   pure $ Map.lookup v sols
 
 getTMeta ::
-  (MonadState s m, HasTypeMetas s s ty ty) =>
+  (MonadState (s ty) m, HasTypeMetas s) =>
   TMeta ->
   m (Maybe (TypeM ty))
 getTMeta v = do
   sols <- use tmetaSolutions
   pure $ Map.lookup v sols
 
-getTMetaKind :: (MonadState s m, HasTypeMetas s s ty ty) => TMeta -> m (Maybe Kind)
+getTMetaKind :: (MonadState (s ty) m, HasTypeMetas s) => TMeta -> m (Maybe Kind)
 getTMetaKind v = do
   ks <- use tmetaKinds
   pure $ Map.lookup v ks
 
 solveTMetas_Type ::
-  (MonadState s m, HasTypeMetas s s ty ty) =>
+  (MonadState (s ty) m, HasTypeMetas s) =>
   (ty -> a) ->
   Type (Either TMeta a) ->
   m (Type (Either TMeta a))
 solveTMetas_Type d = go d
   where
     go ::
-      (MonadState s m, HasTypeMetas s s ty ty) =>
+      (MonadState (s ty) m, HasTypeMetas s) =>
       (ty -> a) ->
       Type (Either TMeta a) ->
       m (Type (Either TMeta a))
@@ -208,13 +208,13 @@ solveKMetas = go
         IR.KType -> pure IR.KType
 
 solveMetas_Constraint ::
-  (MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s) =>
+  (MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)) =>
   IR.Constraint (Either TMeta ty) ->
   m (IR.Constraint (Either TMeta ty))
 solveMetas_Constraint = go id
   where
     go ::
-      (MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s) =>
+      (MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)) =>
       (ty -> a) ->
       IR.Constraint (Either TMeta a) ->
       m (IR.Constraint (Either TMeta a))
@@ -232,13 +232,13 @@ solveMetas_Constraint = go id
           go depth b
 
 solveTMetas_Expr ::
-  (MonadState s m, HasTypeMetas s s ty ty) =>
+  (MonadState (s ty) m, HasTypeMetas s) =>
   IR.Expr (Either TMeta ty) tm ->
   m (IR.Expr (Either TMeta ty) tm)
 solveTMetas_Expr = go
   where
     go ::
-      (MonadState s m, HasTypeMetas s s ty ty) =>
+      (MonadState (s ty) m, HasTypeMetas s) =>
       IR.Expr (Either TMeta ty) tm ->
       m (IR.Expr (Either TMeta ty) tm)
     go e =

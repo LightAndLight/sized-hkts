@@ -1,13 +1,23 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
-module Size where
+module Size
+  ( Size(..), pattern Var, (.@), plusSize, maxSize
+  , sizeConstraintFor
+  )
+where
 
 import Bound ((>>>=), Scope, instantiate1)
+import Bound.Var (Var(..))
 import Control.Monad (ap)
 import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Functor.Classes (eq1, showsPrec1)
+import qualified Data.Text as Text
 import Data.Word (Word64)
+
+import IR (Kind(..))
+import qualified IR
+import qualified Syntax
 
 data Size a
   = Lam (Scope () Size a)
@@ -53,3 +63,47 @@ infixl 5 .@
 (.@) Plus{} _ = error "applying to Plus"
 (.@) Max{} _ = error "applying to Max"
 
+plusSize :: Size a -> Size a -> Size a
+plusSize (Word 0) b = b
+plusSize a (Word 0) = a
+plusSize (Word a) (Word b) = Word (a + b)
+plusSize a b = Plus a b
+
+maxSize :: Size a -> Size a -> Size a
+maxSize (Word 0) b = b
+maxSize a (Word 0) = a
+maxSize (Word a) (Word b) = Word (max a b)
+maxSize a b = Max a b
+
+-- | Computes a size constraint for a type of a particular kind
+--
+-- Examples:
+--
+-- `Type` maps to `Sized #0`
+-- `Type -> Type` maps to `forall t0. Sized t0 => Sized (#0 t0)`
+-- `(Type -> Type) -> Type -> Type` maps to `forall t0. (forall t1. Sized t1 => Sized (t0 t1)) => forall t3. Sized t3 => Sized #0`
+sizeConstraintFor ::
+  Int -> -- type variable name supply
+  Kind ->
+  IR.Constraint (Var () ty)
+sizeConstraintFor nn = go nn [] (B ())
+  where
+    go ::
+      Int ->
+      [x] ->
+      x ->
+      Kind ->
+      IR.Constraint x
+    go n quants x k =
+      case k of
+        KType ->
+          IR.CSized $
+          foldl
+            (\acc v -> Syntax.TApp acc $ Syntax.TVar v)
+            (Syntax.TVar x)
+            quants
+        KArr a b ->
+          IR.CForall (Text.pack $ "t" <> show n) a $
+          IR.CImplies (sizeConstraintFor (n+1) a) $
+          go (n+1) (fmap F quants ++ [B ()]) (F x) b
+        KVar m -> error $ show m <> " in sizeConstraintFor"

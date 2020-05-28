@@ -67,7 +67,7 @@ unifyKind expected actual =
         Just k' -> unifyKind k k'
 
 checkKind ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   ) =>
   Map Text Kind ->
@@ -80,7 +80,7 @@ checkKind kindScope kinds ty k = do
   unifyKind k k'
 
 inferKind ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   ) =>
   Map Text Kind ->

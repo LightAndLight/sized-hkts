@@ -27,7 +27,6 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
@@ -39,6 +38,7 @@ import Syntax (Type)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
+import Size (sizeConstraintFor)
 import TCState
   ( TMeta
   , TypeM, pattern TypeM, unTypeM
@@ -58,7 +58,7 @@ applyTSubs_Constraint subs =
   IR.bindConstraint (either (\m -> maybe (pure $ Left m) unTypeM $ Map.lookup m subs) (pure . Right))
 
 unifyType ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   , Eq ty
   ) =>
@@ -154,13 +154,13 @@ data InferResult ty tm
   }
 
 instantiateScheme ::
-  (MonadState s m, HasTypeMetas s s ty ty) =>
+  (MonadState (s ty) m, HasTypeMetas s) =>
   TypeScheme Void ->
   m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
 instantiateScheme = go (Right . absurd)
   where
     go ::
-      (MonadState s m, HasTypeMetas s s ty ty) =>
+      (MonadState (s ty) m, HasTypeMetas s) =>
       (x -> Either TMeta ty) ->
       TypeScheme x ->
       m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
@@ -181,7 +181,7 @@ instantiateScheme = go (Right . absurd)
             )
 
 inferExpr ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -323,7 +323,7 @@ data CheckResult ty tm
   }
 
 checkExpr ::
-  ( MonadState s m, HasTypeMetas s s ty ty, HasKindMetas s
+  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -445,32 +445,6 @@ zonkExprTypes e =
     IR.BFalse -> pure $ IR.BFalse
     IR.New a -> IR.New <$> zonkExprTypes a
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
-
-sizeConstraintFor ::
-  Int ->
-  Kind ->
-  IR.Constraint (Var () ty)
-sizeConstraintFor nn = go nn [] (B ())
-  where
-    go ::
-      Int ->
-      [x] ->
-      x ->
-      Kind ->
-      IR.Constraint x
-    go n quants x k =
-      case k of
-        KType ->
-          IR.CSized $
-          foldl
-            (\acc v -> Syntax.TApp acc $ Syntax.TVar v)
-            (Syntax.TVar x)
-            quants
-        KArr a b ->
-          IR.CForall (Text.pack $ "t" <> show n) a $
-          IR.CImplies (sizeConstraintFor (n+1) a) $
-          go (n+1) (fmap F quants ++ [B ()]) (F x) b
-        KVar{} -> error "KVar in sizeConstraintFor"
 
 checkFunctionBody ::
   ( MonadError TypeError m
