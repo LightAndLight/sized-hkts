@@ -3,6 +3,10 @@
 {-# language TemplateHaskell #-}
 module Codegen
   ( Code
+  , emptyCode
+  , codeKinds
+  , codeFunctions
+  , codeGlobalTheory
   , genFunction
   , genExpr
   , genDecls
@@ -45,6 +49,16 @@ data Code
   , _codeSupply :: Int
   }
 makeLenses ''Code
+
+emptyCode :: Code
+emptyCode =
+  Code
+  { _codeKinds = mempty
+  , _codeFunctions = mempty
+  , _codeGlobalTheory = mempty
+  , _codeCompiledNames = mempty
+  , _codeSupply = 0
+  }
 
 freshName :: MonadState Code m => m Text
 freshName = do
