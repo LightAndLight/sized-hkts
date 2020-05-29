@@ -7,6 +7,7 @@
 module Typecheck
   ( sizeConstraintFor
   , applyTSubs_Constraint
+  , renderTyName
   , unifyType
   , TypeError(..)
   , CheckResult(..), InferResult(..)
@@ -27,6 +28,7 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
@@ -57,13 +59,20 @@ applyTSubs_Constraint ::
 applyTSubs_Constraint subs =
   IR.bindConstraint (either (\m -> maybe (pure $ Left m) unTypeM $ Map.lookup m subs) (pure . Right))
 
+renderTyName :: Either Int Text -> Text
+renderTyName = either (Text.pack . ("#" <>) . show) id
+
+typeMismatch :: (ty -> Either Int Text) -> TypeM ty -> TypeM ty -> TypeError
+typeMismatch tyNames expected actual =
+  TypeMismatch (renderTyName . tyNames <$> expected) (renderTyName . tyNames <$> actual)
+
 unifyType ::
   ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
   , MonadError TypeError m
   , Eq ty
   ) =>
   Map Text Kind ->
-  (ty -> Text) ->
+  (ty -> Either Int Text) ->
   (ty -> Kind) ->
   TypeM ty ->
   TypeM ty ->
@@ -80,35 +89,35 @@ unifyType kindScope tyNames kinds expected actual = do
         Syntax.TVar (Right b) ->
           if a == b
           then pure mempty
-          else throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+          else throwError $ typeMismatch tyNames expected actual
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TApp a b ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TApp a' b' -> do
           unifyType kindScope tyNames kinds (TypeM a) (TypeM a')
           unifyType kindScope tyNames kinds (TypeM b) (TypeM b')
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TUInt sz ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TUInt sz' | sz == sz' -> pure mempty
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TInt sz ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TInt sz' | sz == sz' -> pure mempty
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TBool ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TBool -> pure mempty
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TPtr ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TPtr -> pure mempty
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TFun args ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
@@ -116,12 +125,12 @@ unifyType kindScope tyNames kinds expected actual = do
           traverse_
             (\(a, b) -> unifyType kindScope tyNames kinds (TypeM a) (TypeM b))
             (Vector.zip args args')
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TName n ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TName n' | n == n' -> pure mempty
-        _ -> throwError $ TypeMismatch (tyNames <$> expected) (tyNames <$> actual)
+        _ -> throwError $ typeMismatch tyNames expected actual
   where
     solveLeft m actual' = do
       m_t <- getTMeta m
@@ -132,7 +141,7 @@ unifyType kindScope tyNames kinds expected actual = do
             Syntax.TVar (Left m') | m == m' -> pure mempty
             _ ->
               if any (either (== m) (const False)) (unTypeM actual')
-              then throwError $ TypeOccurs m (tyNames <$> actual')
+              then throwError $ TypeOccurs m (renderTyName . tyNames <$> actual')
               else tmetaSolutions %= Map.insert m actual'
     solveRight expected' m = do
       m_t <- getTMeta m
@@ -143,7 +152,7 @@ unifyType kindScope tyNames kinds expected actual = do
             Syntax.TVar (Left m') | m == m' -> pure mempty
             _ ->
               if any (either (== m) (const False)) (unTypeM expected')
-              then throwError $ TypeOccurs m (tyNames <$> expected')
+              then throwError $ TypeOccurs m (renderTyName . tyNames <$> expected')
               else tmetaSolutions %= Map.insert m expected'
 
 data InferResult ty tm
@@ -263,7 +272,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       meta <- freshTMeta KType
       unifyType
         kindScope
-        tyNames
+        (Right . tyNames)
         kinds
         (TypeM $ Syntax.TApp (Syntax.TFun argTys) (Syntax.TVar $ Left meta))
         (irType funResult)
@@ -306,7 +315,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       meta <- freshTMeta KType
       unifyType
         kindScope
-        tyNames
+        (Right . tyNames)
         kinds
         (TypeM $ Syntax.TApp Syntax.TPtr $ Syntax.TVar $ Left meta)
         (irType aResult)
@@ -412,7 +421,7 @@ checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
         _ -> throwError $ NotNumeric (tyNames <$> ty)
     _ -> do
       exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
-      unifyType kindScope tyNames kinds ty (irType exprResult)
+      unifyType kindScope (Right . tyNames) kinds ty (irType exprResult)
       pure $
         CheckResult
         { crExpr = irExpr exprResult
@@ -485,7 +494,7 @@ checkFunctionBody tcstate kindScope tyScope tyNames argNames kinds types name mk
         Just k ->
           pure
             ( IR.Forall tyName k $
-              IR.Constraint (sizeConstraintFor 0 k) $
+              IR.Constraint (sizeConstraintFor k) $
               rest'
             , filterTypeSolutions (unvar (\() -> Nothing) Just) tcstate''
             )

@@ -67,7 +67,7 @@ substKMeta f k =
 
 data Constraint a
   = CSized (Type a)
-  | CForall Text Kind (Constraint (Var () a))
+  | CForall (Maybe Text) Kind (Constraint (Var () a))
   | CImplies (Constraint a) (Constraint a)
   deriving (Functor, Foldable, Traversable)
 deriveEq1 ''Constraint

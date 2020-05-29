@@ -1,5 +1,6 @@
 {-# language BangPatterns #-}
 {-# language FlexibleContexts #-}
+{-# language OverloadedLists, OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language ScopedTypeVariables #-}
 {-# language QuantifiedConstraints #-}
@@ -11,12 +12,15 @@ import Control.Lens.Getter (use)
 import Control.Monad (guard)
 import Control.Monad.Except (MonadError)
 import Control.Monad.State (MonadState)
+import Control.Monad.Writer (runWriter, tell)
 import Data.Foldable (foldlM, traverse_)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Monoid (Any(..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Validation (Validation(..), validation)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
@@ -30,7 +34,7 @@ import Check.Entailment
   )
 import Check.Kind (checkKind, unifyKind)
 import Check.TypeError (TypeError)
-import IR (Constraint(..), KMeta, Kind(..), bindConstraint, substKMeta)
+import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
 import Syntax (Type(..))
 import qualified Syntax
@@ -53,7 +57,7 @@ makeSizeTerm ::
   Map Text Kind ->
   Vector Text ->
   Vector Kind ->
-  Map (Constraint (Either TMeta (Var Int Void))) SMeta ->
+  Map (Constraint (Var Int Void)) SMeta ->
   Vector (Type (Var Int Void)) ->
   m (Set SMeta, Size (Either SMeta Void))
 makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
@@ -63,7 +67,7 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
     theory =
       Theory
       { _thGlobal = global
-      , _thLocal = assumedConstraints
+      , _thLocal = Map.mapKeys (fmap Right) assumedConstraints
       }
   foldlM
     (\(usedSizeMetas, sz) a -> do
@@ -79,7 +83,7 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
       (_assumes, subs) <-
         solve
           kindScope
-          (unvar (paramNames Vector.!) absurd)
+          (unvar (Right . (paramNames Vector.!)) absurd)
           (unvar (paramKinds Vector.!) absurd)
           theory
           [(placeholder, CSized $ Right <$> t)]
@@ -87,30 +91,77 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
 
 -- | Given some assumptions and an instance head, construct an axiom type
 makeSizeConstraint ::
-  Vector (Constraint (Either TMeta (Var Int Void))) ->
-  Type (Either TMeta (Var Int Void)) ->
+  Vector Kind ->
+  Vector (Constraint (Var Int Void)) ->
+  Type (Var Int Void) ->
   Constraint Void
-makeSizeConstraint as = _ $ go 0 (Vector.toList as)
+makeSizeConstraint paramKinds as =
+  validation (error . ("makeSizeConstraint: un-abstracted bound variable: " <>) . show) id .
+  traverse (unvar (Failure . Set.singleton) absurd) .
+  go mempty (Vector.toList as)
   where
+    indices :: Vector Int
+    indices = [0..length paramKinds-1]
+
+    -- attempt to abstract over the provided index not present in the set.
+    -- if no abstraction was done, returns a Nothing.
+    abstractVar ::
+      Int ->
+      Constraint (Var Int Void) ->
+      Maybe (Constraint (Var () (Var Int Void)))
+    abstractVar n c =
+      let
+        (res, abstracted) =
+          runWriter $ do
+          traverse
+            (unvar
+              (\n' -> if n == n' then B () <$ tell (Any True) else pure . F $ B n')
+              absurd
+            )
+            c
+      in
+        if getAny abstracted
+        then Just res
+        else Nothing
+
+    abstractVars ::
+      Set Int ->
+      Constraint (Var Int Void) ->
+      Constraint (Var Int Void)
+    abstractVars ns c =
+      let
+        toAbstractOver = Vector.filter (`Set.notMember` ns) indices
+      in
+        foldr
+          (\n rest -> do
+             case abstractVar n rest of
+               Nothing ->
+                 rest
+               Just rest' ->
+                 CForall Nothing (paramKinds Vector.! n) rest'
+          )
+          c
+          toAbstractOver
+
+    -- the aim of this function is to insert foralls as 'deeply' as possible
+    -- e.g. `forall a. C a => forall b. C b => C (f a b)` instead of `forall a b. C a => C b => C (f a b)`
     go ::
-      Int -> -- the remaining entries
-      [Constraint (Either TMeta (Var Int Void))] ->
-      Type (Either TMeta (Var Int Void)) ->
-      Constraint (Either TMeta (Var Int Void))
-    go !n assumes hd =
+      Set Int -> -- free variables that we've seen so far
+      [Constraint (Var Int Void)] ->
+      Type (Var Int Void) ->
+      Constraint (Var Int Void)
+    go !freeVars assumes hd =
       case assumes of
-        [] -> CSized hd
+        [] ->
+          abstractVars freeVars $
+          CSized hd
         a:rest ->
           let
-            hd' = go (n+1) rest hd
+            hd' =
+              CImplies a $
+              go (freeVars <> foldMap (unvar Set.singleton absurd) a) rest hd
           in
-            CForall (error "TODO") (error "TODO") . CImplies (F <$> a) $
-            bindConstraint
-              (either
-                 (TVar . F . Left)
-                 (unvar (\ix -> if ix == n then TVar $ B () else TVar $ F $ Right $ B ix) absurd)
-              )
-              hd'
+            abstractVars freeVars hd'
 
 checkADT ::
   forall s m.
@@ -143,14 +194,14 @@ checkADT kScope datatypeName paramNames ctors = do
   sizeMetas <- Vector.replicateM (Vector.length paramNames) freshSMeta
   paramKinds <- traverse (fmap (substKMeta $ const KType) . solveKMetas . KVar) paramMetas
   let
-    assumedConstraintsFwd :: Map (Constraint (Either TMeta (Var Int Void))) SMeta
-    assumedConstraintsBwd :: Map SMeta (Constraint (Either TMeta (Var Int Void)))
+    assumedConstraintsFwd :: Map (Constraint (Var Int Void)) SMeta
+    assumedConstraintsBwd :: Map SMeta (Constraint (Var Int Void))
     (assumedConstraintsFwd, assumedConstraintsBwd) =
       Vector.ifoldl'
         (\(accFwd, accBwd) ix s ->
            let
              k = paramKinds Vector.! ix
-             c = Right . unvar (\() -> B ix) F <$> sizeConstraintFor 0 k
+             c = unvar (\() -> B ix) F <$> sizeConstraintFor k
            in
              ( Map.insert c s accFwd
              , Map.insert s c accBwd
@@ -170,15 +221,15 @@ checkADT kScope datatypeName paramNames ctors = do
       ctors
 
   let
-    usedConstraints :: Vector (Constraint (Either TMeta (Var Int Void)))
+    usedConstraints :: Vector (Constraint (Var Int Void))
     usedConstraints =
       Vector.map (assumedConstraintsBwd Map.!) $
       Vector.filter (`Set.member` usedSizeMetas) sizeMetas
 
-    axiomHead :: Type (Either TMeta (Var Int Void))
+    axiomHead :: Type (Var Int Void)
     axiomHead =
-      foldl
-        (\acc ix -> TApp acc (TVar $ Right $ B ix))
+      Vector.foldl
+        (\acc ix -> TApp acc (TVar $ B ix))
         (TName datatypeName)
         [0..length paramNames - 1]
 
@@ -189,14 +240,14 @@ checkADT kScope datatypeName paramNames ctors = do
         (foldr
            (\s -> Lam . abstract (either (guard . (s ==)) (const Nothing)))
            sz
-           sizeMetas
+           usedSizeMetas
         )
   case m_sz' of
     Nothing -> error "failed to abstract over all SMetas"
     Just sz' ->
       pure
         ( IR.substKMeta (const KType) datatypeKind''
-        , makeSizeConstraint usedConstraints axiomHead
+        , makeSizeConstraint paramKinds usedConstraints axiomHead
         , sz'
         )
   where
@@ -224,7 +275,7 @@ checkADT kScope datatypeName paramNames ctors = do
     adtSizeTerm ::
       Map Text Kind ->
       Vector Kind ->
-      Map (Constraint (Either TMeta (Var Int Void))) SMeta ->
+      Map (Constraint (Var Int Void)) SMeta ->
       Int ->
       Set SMeta ->
       Size (Either SMeta Void) ->

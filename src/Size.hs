@@ -12,7 +12,6 @@ import Bound.Var (Var(..))
 import Control.Monad (ap)
 import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Functor.Classes (eq1, showsPrec1)
-import qualified Data.Text as Text
 import Data.Word (Word64)
 
 import IR (Kind(..))
@@ -83,18 +82,16 @@ maxSize a b = Max a b
 -- `Type -> Type` maps to `forall t0. Sized t0 => Sized (#0 t0)`
 -- `(Type -> Type) -> Type -> Type` maps to `forall t0. (forall t1. Sized t1 => Sized (t0 t1)) => forall t3. Sized t3 => Sized #0`
 sizeConstraintFor ::
-  Int -> -- type variable name supply
   Kind ->
   IR.Constraint (Var () ty)
-sizeConstraintFor nn = go nn [] (B ())
+sizeConstraintFor = go [] (B ())
   where
     go ::
-      Int ->
       [x] ->
       x ->
       Kind ->
       IR.Constraint x
-    go n quants x k =
+    go quants x k =
       case k of
         KType ->
           IR.CSized $
@@ -103,7 +100,7 @@ sizeConstraintFor nn = go nn [] (B ())
             (Syntax.TVar x)
             quants
         KArr a b ->
-          IR.CForall (Text.pack $ "t" <> show n) a $
-          IR.CImplies (sizeConstraintFor (n+1) a) $
-          go (n+1) (fmap F quants ++ [B ()]) (F x) b
+          IR.CForall Nothing a $
+          IR.CImplies (sizeConstraintFor a) $
+          go (fmap F quants ++ [B ()]) (F x) b
         KVar m -> error $ show m <> " in sizeConstraintFor"

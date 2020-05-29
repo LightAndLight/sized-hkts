@@ -24,6 +24,7 @@ library
                      , Compile
                      , IR
                      , Size
+                     , Size.Builtins
                      , Syntax
                      , TCState
                      , Typecheck
@@ -36,6 +37,7 @@ library
                      , mtl
                      , text
                      , transformers
+                     , validation
                      , vector
   hs-source-dirs:      src
   default-language:    Haskell2010
@@ -59,5 +61,6 @@ test-suite sized-hkts-test
                      , bound
                      , containers >= 0.6
                      , hspec
+                     , lens
                      , mtl
                      , transformers

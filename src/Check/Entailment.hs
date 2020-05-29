@@ -10,6 +10,9 @@ module Check.Entailment
   , Theory(..), theoryToList, insertLocal, mapTy
   , HasGlobalTheory(..)
   , EntailState, emptyEntailState
+  , entailTCState
+  , entailSizeMeta
+  , entailGlobalTheory
   , HasSizeMetas(..)
   , freshSMeta
   , findSMeta
@@ -30,6 +33,7 @@ import Control.Monad (guard)
 import Control.Monad.Except (MonadError, runExceptT, throwError)
 import Control.Monad.State (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
+import Data.Bifunctor (first)
 import Data.Foldable (asum, foldl')
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -47,7 +51,7 @@ import TCState
   , filterTypeSolutions
   , solveMetas_Constraint
   )
-import Typecheck (unifyType)
+import Typecheck (renderTyName, unifyType)
 
 newtype SMeta = SMeta Int
   deriving (Eq, Ord, Show)
@@ -152,7 +156,7 @@ solve ::
   , Ord ty
   ) =>
   Map Text Kind ->
-  (ty -> Text) ->
+  (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
   [(SMeta, Constraint (Either TMeta ty))] ->
@@ -166,7 +170,7 @@ solve kindScope tyNames kinds theory (c:cs) = do
   case m_res of
     Nothing -> do
       c' <- solveMetas_Constraint (snd c)
-      case withoutMetas (Right . tyNames) c' of
+      case withoutMetas (Right . renderTyName . tyNames) c' of
         Nothing -> do
           (cs', sols') <- solve kindScope tyNames kinds theory cs
           pure ((fst c, c') : cs', sols')
@@ -180,7 +184,7 @@ entails ::
   , Eq ty
   ) =>
   Map Text Kind ->
-  (ty -> Text) ->
+  (ty -> Either Int Text) ->
   (ty -> Kind) ->
   (Size (Either SMeta sz), Constraint (Either TMeta ty)) ->
   (SMeta, Constraint (Either TMeta ty)) ->
@@ -221,7 +225,7 @@ simplify ::
   , Ord ty
   ) =>
   Map Text Kind ->
-  (ty -> Text) ->
+  (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
   (SMeta, Constraint (Either TMeta ty)) ->
@@ -231,20 +235,20 @@ simplify ::
     )
 simplify kindScope tyNames kinds theory (consVar, cons) =
   case cons of
-    CForall n k a -> do
+    CForall m_n k a -> do
       ameta <- freshSMeta
       es <- get
       ((aAssumes, asubs), es') <-
         flip runStateT (over (tmetaSolutions.mapped.mapped) F es) $
         simplify
           kindScope
-          (unvar (\() -> n) tyNames)
+          (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
           (unvar (\() -> k) kinds)
           (mapTy (fmap F) theory)
           (ameta, sequence <$> a)
       put $ filterTypeSolutions (unvar (\() -> Nothing) Just) es'
       pure
-        ( (fmap.fmap) (CForall n k . fmap sequence) aAssumes
+        ( (fmap.fmap) (CForall m_n k . fmap sequence) aAssumes
         , Map.singleton consVar (fromMaybe (error "ameta not solved") $ Map.lookup ameta asubs)
         )
     CImplies a b -> do
@@ -276,5 +280,5 @@ simplify kindScope tyNames kinds theory (consVar, cons) =
       case m_res of
         Nothing -> do
           cons' <- solveMetas_Constraint cons
-          throwError $ CouldNotDeduce ((fmap.fmap) tyNames cons')
+          throwError $ CouldNotDeduce ((fmap.fmap) (renderTyName . tyNames) cons')
         Just (assumes, sub) -> pure (assumes, sub)

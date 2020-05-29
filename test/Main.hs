@@ -5,9 +5,11 @@ module Main where
 
 import Bound.Scope (toScope)
 import Bound.Var (Var(..))
+import Control.Lens.Setter ((.~))
 import Control.Monad.Except (runExceptT)
 import Control.Monad.State (evalState, evalStateT)
 import Control.Monad.Trans.Maybe (runMaybeT)
+import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Void (Void, absurd)
@@ -16,11 +18,14 @@ import Test.Hspec
 import Check.Datatype (checkADT)
 import Check.Entailment
   ( SMeta(..), Theory(..)
-  , composeSSubs, emptyEntailState, freshSMeta, simplify, solve
+  , composeSSubs
+  , emptyEntailState, entailGlobalTheory
+  , freshSMeta, simplify, solve
   )
 import Check.TypeError (TypeError(..))
 import Size ((.@), Size)
 import qualified Size (Size(..), pattern Var)
+import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
 import qualified IR
 import Syntax (Type(..), WordSize(..))
@@ -33,10 +38,10 @@ main =
   hspec $ do
     describe "sizeConstraintFor" $ do
       it "*" $
-        sizeConstraintFor @Void 0 KType `shouldBe` CSized (TVar $ B ())
+        sizeConstraintFor @Void KType `shouldBe` CSized (TVar $ B ())
       it "* -> *" $
-        sizeConstraintFor @Void 0 (KArr KType KType) `shouldBe`
-        CForall "t0" KType
+        sizeConstraintFor @Void (KArr KType KType) `shouldBe`
+        CForall Nothing KType
           (CImplies
              (CSized (TVar $ B ()))
              (CSized $
@@ -46,11 +51,11 @@ main =
              )
           )
       it "* -> * -> *" $
-        sizeConstraintFor @Void 0 (KArr KType $ KArr KType KType) `shouldBe`
-        CForall "t0" KType
+        sizeConstraintFor @Void (KArr KType $ KArr KType KType) `shouldBe`
+        CForall Nothing KType
           (CImplies
              (CSized $ TVar $ B ())
-             (CForall "t1" KType . CImplies (CSized $ TVar $ B ()) $
+             (CForall Nothing KType . CImplies (CSized $ TVar $ B ()) $
               CSized $
               TApp
                 (TApp
@@ -61,16 +66,16 @@ main =
              )
           )
       it "* -> (* -> *) -> *" $
-        sizeConstraintFor @Void 0 (KArr KType $ KArr (KArr KType KType) KType) `shouldBe`
+        sizeConstraintFor @Void (KArr KType $ KArr (KArr KType KType) KType) `shouldBe`
         -- forall x : Type
-        CForall "t0" KType
+        CForall Nothing KType
           -- Sized x =>
           (CImplies (CSized $ TVar $ B ()) $
            -- forall y : Type -> Type.
-           CForall "t1" (KArr KType KType) .
+           CForall Nothing (KArr KType KType) .
            -- (forall z : Type. Sized z => Sized (y z)) =>
            CImplies
-             (CForall "t2" KType $
+             (CForall Nothing KType $
               CImplies
                 (CSized $ TVar $ B ())
                 (CSized $ TApp (TVar $ F $ B ()) (TVar $ B ()))
@@ -112,7 +117,7 @@ main =
             Theory
             { _thGlobal =
               [ (CSized $ TUInt S64, Size.Word 64)
-              , ( CForall "a" KType $
+              , ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
@@ -142,7 +147,7 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ ( CForall "a" KType $
+              [ ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
@@ -167,7 +172,7 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ ( CForall "x" KType $
+              [ ( CForall (Just "x") KType $
                   CImplies
                     (CSized $ TVar $ B ())
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
@@ -182,7 +187,7 @@ main =
               fmap (fromMaybe ([], mempty)) . runMaybeT $
               simplify mempty absurd absurd theory
                 ( m
-                , CForall "a" KType $
+                , CForall (Just "a") KType $
                   CImplies
                     (CSized $ TApp (TName "Pair") (TVar $ B ()))
                     (CSized $ TVar $ B ())
@@ -222,6 +227,9 @@ main =
         result `shouldBe`
           Right
             ( KArr KType $ KArr KType KType
+            , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
+              CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
+              CSized $ foldl @[] TApp (TName "Pair") [TVar . F $ B (), TVar $ B ()]
             , Size.Lam $ toScope $
               Size.Lam $ toScope $
               Size.Plus (Size.Var $ F $ B ()) (Size.Var $ B ())
@@ -241,17 +249,26 @@ main =
                  ]
                  Syntax.End
               )
+          fConstraint =
+            CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- a
+            CSized $ foldl @[] TApp (TVar . F $ B ()) [TVar $ B ()]
 
-        result `shouldBe`
-          Right
-            ( KArr (KArr KType KType) $ KArr KType $ KArr KType KType
-            , Size.Lam $ toScope $
+        case result of
+          Left err -> expectationFailure $ "Expected success, got failure: " <> show err
+          Right (kind, constraint, size) -> do
+            kind `shouldBe` KArr (KArr KType KType) (KArr KType $ KArr KType KType)
+            constraint `shouldBe`
+              CForall Nothing (KArr KType KType) (CImplies fConstraint $ -- f
+              CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- a
+              CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- b
+              CSized $ foldl @[] TApp (TName "Pair") [TVar . F . F $ B (), TVar . F $ B (), TVar $ B ()])
+            size `shouldBe`
+              Size.Lam (toScope $
               Size.Lam $ toScope $
               Size.Lam $ toScope $
               Size.Plus
                 (Size.Var (F $ F $ B ()) .@ Size.Var (F $ B ()))
-                (Size.Var (F $ F $ B ()) .@ Size.Var (B ()))
-            )
+                (Size.Var (F $ F $ B ()) .@ Size.Var (B ())))
       it "check `struct Sum<A, B>{ Left(A), Right(B) }`" $ do
         let
           result =
@@ -267,8 +284,31 @@ main =
         result `shouldBe`
           Right
             ( KArr KType $ KArr KType KType
+            -- forall t0. Sized t0 => forall t1. Sized t1 => Sized (Sum t0 t1)
+            , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
+              CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
+              CSized $ foldl @[] TApp (TName "Sum") [TVar . F $ B (), TVar $ B ()]
             , Size.Lam $ toScope $
               Size.Lam $ toScope $
               Size.Plus (Size.Word 8) $
               Size.Max (Size.Var $ F $ B ()) (Size.Var $ B ())
+            )
+      it "check `struct Box<A>(Ptr<A>)`" $ do
+        let
+          result =
+            flip evalStateT (emptyEntailState & entailGlobalTheory .~ Map.fromList Size.builtins) $
+            checkADT
+              mempty
+              "Box"
+              ["A"]
+              (Syntax.Ctor "Box" [Syntax.TApp Syntax.TPtr . Syntax.TVar $ B 0] $
+               Syntax.End)
+
+        result `shouldBe`
+          Right
+            ( KArr KType KType
+            -- forall t0. Sized (Box t0)
+            , CForall Nothing KType .
+              CSized $ foldl @[] TApp (TName "Box") [TVar $ B ()]
+            , Size.Word 64
             )

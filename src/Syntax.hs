@@ -10,6 +10,7 @@ import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compar
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Void (Void)
+import Data.Word (Word64)
 
 data WordSize
   = S8
@@ -17,6 +18,17 @@ data WordSize
   | S32
   | S64
   deriving (Eq, Ord, Show)
+
+wordSize :: WordSize -> Word64
+wordSize w =
+  case w of
+    S8 -> 8
+    S16 -> 16
+    S32 -> 32
+    S64 -> 64
+
+wordSizes :: [WordSize]
+wordSizes = [S8, S16, S32, S64]
 
 data Type a
   = TVar a
