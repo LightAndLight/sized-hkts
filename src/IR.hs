@@ -133,3 +133,7 @@ deriveEq1 ''TypeScheme
 deriveShow1 ''TypeScheme
 instance Eq ty => Eq (TypeScheme ty) where; (==) = eq1
 instance Show ty => Show (TypeScheme ty) where; showsPrec = showsPrec1
+
+toTypeScheme :: Function -> TypeScheme Void
+toTypeScheme (Function _ tyArgs constrs args ret _) =
+  TypeScheme tyArgs constrs args ret

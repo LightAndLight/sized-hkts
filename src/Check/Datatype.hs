@@ -164,6 +164,10 @@ makeSizeConstraint paramKinds as =
           in
             abstractVars freeVars hd'
 
+-- | Check that an ADT is well formed, and return
+-- * its kind
+-- * its axiom type
+-- * its sizeterm
 checkADT ::
   forall s m.
   ( MonadState (s (Var Int Void)) m
