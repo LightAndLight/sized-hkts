@@ -4,6 +4,7 @@
 module IR where
 
 import Bound.Var (Var(..), unvar)
+import Data.Bifunctor (bimap)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1, deriveEq2, deriveShow2)
 import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compare1, showsPrec1)
 import Data.Text (Text)
@@ -18,7 +19,7 @@ data Expr ty tm
   = Var tm
   | Name Text
 
-  | Let (Vector (Text, Expr ty tm)) (Expr ty tm)
+  | Let (Vector ((Text, Expr ty tm), Type ty)) (Expr ty tm)
   | Inst Text (Vector (Type ty))
   | Call (Expr ty tm) (Vector (Expr ty tm))
 
@@ -35,7 +36,7 @@ data Expr ty tm
   | BTrue
   | BFalse
 
-  | New (Expr ty tm)
+  | New (Expr ty tm) (Type ty)
   | Deref (Expr ty tm)
   deriving (Functor, Foldable, Traversable)
 deriveEq2 ''Expr
@@ -50,7 +51,10 @@ bindType_Expr f e =
   case e of
     Var a -> Var a
     Name a -> Name a
-    Let es b -> Let ((fmap.fmap) (bindType_Expr f) es) (bindType_Expr f b)
+    Let es b ->
+      Let
+        (fmap (bimap (fmap (bindType_Expr f)) (>>= f)) es)
+        (bindType_Expr f b)
     Inst n ts -> Inst n ((>>= f) <$> ts)
     Call a bs -> Call (bindType_Expr f a) (bindType_Expr f <$> bs)
     UInt8 ws -> UInt8 ws
@@ -63,7 +67,7 @@ bindType_Expr f e =
     Int64 ws -> Int64 ws
     BTrue -> BTrue
     BFalse -> BFalse
-    New a -> New $ bindType_Expr f a
+    New a t -> New (bindType_Expr f a) (t >>= f)
     Deref a -> Deref $ bindType_Expr f a
 
 newtype KMeta = KMeta Int

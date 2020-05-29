@@ -21,6 +21,7 @@ import Bound.Var (unvar)
 import Control.Lens.Setter ((%=), (<>=))
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
+import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldlM, foldl', traverse_)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Map (Map)
@@ -231,7 +232,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
              requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType bResult)
              pure
                ( Map.insert n (irType bResult) acc
-               , Vector.snoc bs (n, irExpr bResult)
+               , Vector.snoc bs ((n, irExpr bResult), unTypeM $ irType bResult)
                )
           )
           (mempty, mempty)
@@ -290,7 +291,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType aResult)
       pure $
         InferResult
-        { irExpr = IR.New $ irExpr aResult
+        { irExpr = IR.New (irExpr aResult) (unTypeM $ irType aResult)
         , irType = TypeM $ Syntax.TApp Syntax.TPtr (unTypeM $ irType aResult)
         }
 
@@ -419,7 +420,15 @@ zonkExprTypes e =
   case e of
     IR.Var a -> pure $ IR.Var a
     IR.Name n -> pure $ IR.Name n
-    IR.Let bs rest -> IR.Let <$> (traverse.traverse) zonkExprTypes bs <*> zonkExprTypes rest
+    IR.Let bs rest ->
+      IR.Let <$>
+      traverse
+        (bitraverse
+           (traverse zonkExprTypes)
+           (traverse (either (error . ("zonking found: " <>) . show) pure))
+        )
+        bs <*>
+      zonkExprTypes rest
     IR.Inst n args ->
       IR.Inst n <$>
       (traverse.traverse)
@@ -436,5 +445,10 @@ zonkExprTypes e =
     IR.Int64 n -> pure $ IR.Int64 n
     IR.BTrue -> pure $ IR.BTrue
     IR.BFalse -> pure $ IR.BFalse
-    IR.New a -> IR.New <$> zonkExprTypes a
+    IR.New a t ->
+      IR.New <$>
+      zonkExprTypes a <*>
+      traverse
+        (either (error . ("zonking found: " <>) . show) pure)
+        t
     IR.Deref a -> IR.Deref <$> zonkExprTypes a

@@ -44,7 +44,8 @@ data CExpr
 
 data CStatement
   = Return CExpr
-  | Assign CType Text CExpr
+  | Declare CType Text CExpr
+  | Assign CExpr CExpr
   deriving (Eq, Show)
 
 data CDecl

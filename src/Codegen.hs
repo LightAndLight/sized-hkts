@@ -5,6 +5,7 @@ module Codegen
   ( Code
   , genFunction
   , genExpr
+  , genDecls
   )
 where
 
@@ -12,8 +13,8 @@ import Bound.Var (unvar)
 import Control.Lens.Getter (use, uses)
 import Control.Lens.Setter ((.=), (%=))
 import Control.Lens.TH (makeLenses)
-import Control.Monad.State (MonadState)
-import Control.Monad.Writer (WriterT, tell)
+import Control.Monad.State (MonadState, evalStateT)
+import Control.Monad.Writer (WriterT, runWriterT, tell)
 import Data.Foldable (foldrM, traverse_)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -23,14 +24,20 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Codegen.C (C, CDecl, CExpr, CStatement, CType)
+import Check.Entailment (Theory(..), emptyEntailState, findSMeta, freshSMeta, solve)
+import Codegen.C (CDecl, CExpr, CStatement, CType)
 import qualified Codegen.C as C
 import qualified IR
+import TCState (emptyTCState)
+import Size (Size)
+import qualified Size
 import qualified Syntax
 
 data Code
   = Code
-  { _codeFunctions :: Map Text IR.Function
+  { _codeKinds :: Map Text IR.Kind
+  , _codeFunctions :: Map Text IR.Function
+  , _codeGlobalTheory :: Map (IR.Constraint Void) (Size Void)
   , _codeCompiledNames ::
       Map
         (Text, Vector (Syntax.Type Void))
@@ -102,12 +109,12 @@ genExpr vars expr =
       genBindings es
       genExpr vars b
       where
-        genBindings :: Vector (Text, IR.Expr Void tm) -> WriterT [CStatement] m ()
+        genBindings :: Vector ((Text, IR.Expr Void tm), Syntax.Type Void) -> WriterT [CStatement] m ()
         genBindings =
           traverse_
-            (\(bname, bval) -> do
+            (\((bname, bval), bty) -> do
                bval' <- genExpr vars bval
-               tell [C.Assign _ bname bval']
+               tell [C.Declare (genType bty) bname bval']
             )
     IR.Inst n ts -> genInst n ts
     IR.Call a bs -> do
@@ -124,7 +131,36 @@ genExpr vars expr =
     IR.Int64 n -> pure . C.Number $ fromIntegral n
     IR.BTrue -> pure C.BTrue
     IR.BFalse -> pure C.BFalse
-    IR.New a -> C.Malloc <$> _ a
+    IR.New a t -> do
+      a' <- genExpr vars a
+      kindScope <- use codeKinds
+      global <- use codeGlobalTheory
+      let
+        m_size =
+          flip evalStateT (emptyEntailState emptyTCState) $ do
+            m <- freshSMeta
+            (_, solutions) <-
+              solve
+                kindScope
+                absurd
+                absurd
+                (Theory { _thGlobal = global, _thLocal = mempty })
+                [(m, IR.CSized $ Right <$> t)]
+            pure $ findSMeta solutions m
+      case m_size of
+        Left err -> error $ "genExpr: solve failed with " <> show err
+        Right size ->
+          case size of
+            Size.Word n -> do
+              let pt = C.Ptr $ genType t
+              n1 <- freshName
+              tell
+                [ C.Declare pt n1 . C.Cast pt $
+                  C.Malloc (C.Number $ fromIntegral n)
+                , C.Assign (C.Var n1) a'
+                ]
+              pure $ C.Var n1
+            _ -> error $ "genExpr: " <> show size <> " is not a Word"
     IR.Deref a -> C.Deref <$> genExpr vars a
 
 genFunction ::
@@ -132,7 +168,7 @@ genFunction ::
   IR.Function ->
   Vector (Syntax.Type Void) ->
   m CDecl
-genFunction (IR.Function name tyArgs constraints args retTy body) tyArgs' =
+genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
   let
     tyArgsLen = length tyArgs
   in
@@ -150,14 +186,25 @@ genFunction (IR.Function name tyArgs constraints args retTy body) tyArgs' =
       EQ -> do
         let
           inst = unvar (tyArgs' Vector.!) absurd
-          constraints_inst = IR.bindConstraint inst <$> constraints
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst
           body_inst = IR.bindType_Expr inst body
-        body' <- genExpr _ body_inst
+        (body', sts) <- runWriterT $ genExpr (unvar (fmap fst args Vector.!) absurd) body_inst
         pure $
           C.Function
             (genType retTy_inst)
             name
             ((\(n, t) -> (genType t, n)) <$> args_inst)
-            body'
+            (sts <> [C.Return body'])
+
+genDecls :: MonadState Code m => m [CDecl]
+genDecls = do
+  names <- uses codeCompiledNames Map.toList
+  foldrM
+    (\(n, m_decl) rest ->
+       case m_decl of
+         Nothing -> error $ "genDecls: no decl for " <> show n
+         Just decl -> pure $ decl : rest
+    )
+    []
+    names

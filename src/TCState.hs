@@ -35,6 +35,7 @@ import Control.Monad.Except (ExceptT(..), runExceptT)
 import Control.Monad.State (MonadState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
+import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldl')
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -284,7 +285,7 @@ solveTMetas_Expr = go
         IR.Name n -> pure $ IR.Name n
         IR.Let bs rest ->
           IR.Let <$>
-          (traverse.traverse) go bs <*>
+          traverse (bitraverse (traverse go) (solveTMetas_Type id)) bs <*>
           go rest
         IR.Inst n args ->
           IR.Inst n <$>
@@ -305,5 +306,5 @@ solveTMetas_Expr = go
         IR.Int64 n -> pure $ IR.Int64 n
         IR.BTrue -> pure $ IR.BTrue
         IR.BFalse -> pure $ IR.BFalse
-        IR.New a -> IR.New <$> go a
+        IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t
         IR.Deref a -> IR.Deref <$> go a
