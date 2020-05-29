@@ -84,27 +84,26 @@ bindConstraint f c =
     CImplies a b -> CImplies (f `bindConstraint` a) (f `bindConstraint` b)
     CForall n k a -> CForall n k (unvar (pure . B) (fmap F . f) `bindConstraint` a)
 
-data FunctionBody ty tm
-  = Forall Text Kind (FunctionBody (Var () ty) tm)
-  | Arg Text (Type ty) (FunctionBody ty (Var () tm))
-  | Constraint (Constraint ty) (FunctionBody ty tm)
-  | Done (Type ty) (Expr ty tm)
-deriveEq2 ''FunctionBody
-deriveShow2 ''FunctionBody
-instance Eq ty => Eq1 (FunctionBody ty) where; liftEq = liftEq2 (==)
-instance Show ty => Show1 (FunctionBody ty) where; liftShowsPrec = liftShowsPrec2 showsPrec showList
-instance (Eq ty, Eq tm) => Eq (FunctionBody ty tm) where; (==) = eq1
-instance (Show ty, Show tm) => Show (FunctionBody ty tm) where; showsPrec = showsPrec1
-
 data Function
   = Function
   { funcName :: Text
-  , funcBody :: FunctionBody Void Void
+  , funcTyArgs :: Vector (Text, Kind)
+  , funcConstraints :: Vector (Constraint (Var Int Void)) -- indices from funcTyArgs
+  , funcArgs :: Vector (Text, Type (Var Int Void)) -- indices from funcTyArgs
+  , funcRetTy :: Type (Var Int Void) -- indices from funcTyArgs
+  , funcBody ::
+      Expr
+        (Var Int Void) -- indices from funcTyArgs
+        (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
 data TypeScheme ty
-  = SForall Text Kind (TypeScheme (Var () ty))
-  | SDone (Vector (Constraint ty)) (Vector (Type ty)) (Type ty)
+  = TypeScheme
+  { schemeTyArgs :: Vector (Text, Kind)
+  , schemeConstraints :: Vector (Constraint (Var Int ty)) -- indices from schemeTyArgs
+  , schemeArgs :: Vector (Text, Type (Var Int ty)) -- indices from schemeTyArgs
+  , schemeRetTy :: Type (Var Int ty) -- indices from schemeTyArgs
+  }
 deriveEq1 ''TypeScheme
 deriveShow1 ''TypeScheme
 instance Eq ty => Eq (TypeScheme ty) where; (==) = eq1

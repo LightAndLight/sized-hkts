@@ -46,7 +46,7 @@ import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import TCState
   ( TCState, TMeta(..), TMeta, pattern TypeM
-  , HasTypeMetas(..), HasKindMetas(..)
+  , HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
   , freshTMeta
   , FilterTypes, filterTypes, mapTypes
   , solveMetas_Constraint
@@ -119,6 +119,9 @@ makeLenses ''EntailState
 
 instance HasGlobalTheory (tc ty) => HasGlobalTheory (EntailState tc ty) where
   globalTheory = entailGlobalTheory
+
+instance HasConstraints tc => HasConstraints (EntailState tc) where
+  requiredConstraints = entailTCState.requiredConstraints
 
 instance FilterTypes tc => FilterTypes (EntailState tc) where
   filterTypes f es = es { _entailTCState = filterTypes f $ _entailTCState es }

@@ -21,7 +21,7 @@ import Bound.Var (unvar)
 import Control.Lens.Setter ((%=), (<>=))
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
-import Data.Foldable (foldlM, traverse_)
+import Data.Foldable (foldlM, foldl', traverse_)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -29,6 +29,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import Data.Word (Word8, Word16, Word32, Word64)
@@ -161,29 +162,22 @@ data InferResult ty tm
 instantiateScheme ::
   (MonadState (s ty) m, HasTypeMetas s, Ord ty) =>
   TypeScheme Void ->
-  m ([TMeta], Set (IR.Constraint (Either TMeta ty)), TypeM ty)
-instantiateScheme = go (Right . absurd)
-  where
-    go ::
-      (MonadState (s ty) m, HasTypeMetas s, Ord ty) =>
-      (x -> Either TMeta ty) ->
-      TypeScheme x ->
-      m ([TMeta], Set (IR.Constraint (Either TMeta ty)), TypeM ty)
-    go var scheme =
-      case scheme of
-        IR.SForall _ k rest -> do
-          meta <- freshTMeta k
-          (ms, cs, ty) <- go (unvar (\() -> Left meta) var) rest
-          pure (meta:ms, cs, ty)
-        IR.SDone constraints argTys ty ->
-          pure
-            ( []
-            , foldr (\c -> Set.insert $ fmap var c) mempty constraints
-            , TypeM $
-              Syntax.TApp
-                (Syntax.TFun $ fmap var <$> argTys)
-                (var <$> ty)
-            )
+  m (Vector TMeta, Set (IR.Constraint (Either TMeta ty)), TypeM ty)
+instantiateScheme (IR.TypeScheme tyArgs constraints args retTy) = do
+  tyArgMetas <- traverse (\(_, k) -> freshTMeta k) tyArgs
+  let placeMetas = unvar (Left . (tyArgMetas Vector.!)) absurd
+  pure
+    ( tyArgMetas
+    , foldl'
+        (\acc c -> Set.insert (placeMetas <$> c) acc)
+        mempty
+        constraints
+    , TypeM $
+      Syntax.TApp
+        (Syntax.TFun $ fmap placeMetas . snd <$> args
+        )
+        (placeMetas <$> retTy)
+    )
 
 inferExpr ::
   ( MonadState (s ty) m
@@ -219,7 +213,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
               requiredConstraints <>= constraints
               pure $
                 InferResult
-                { irExpr = IR.Inst name $ Syntax.TVar . Left <$> Vector.fromList metas
+                { irExpr = IR.Inst name $ Syntax.TVar . Left <$> metas
                 , irType = bodyTy
                 }
         Just ty ->

@@ -5,8 +5,8 @@ module Syntax where
 import Bound.TH (makeBound)
 import Bound.Var (Var)
 import Control.Monad (ap)
-import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1, deriveEq2, deriveShow2)
-import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compare1, showsPrec1)
+import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1)
+import Data.Functor.Classes (eq1, compare1, showsPrec1)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Void (Void)
@@ -98,22 +98,13 @@ instance Monad Expr where
       New v -> New (v >>= f)
       Deref p -> Deref (p >>= f)
 
-data FunctionBody ty tm
-  = Forall Text (FunctionBody (Var () ty) tm)
-  | Arg Text (Type ty) (FunctionBody ty (Var () tm))
-  | Done (Type ty) (Expr tm)
-  deriving (Functor, Foldable, Traversable)
-deriveEq2 ''FunctionBody
-deriveShow2 ''FunctionBody
-instance Eq ty => Eq1 (FunctionBody ty) where; liftEq = liftEq2 (==)
-instance Show ty => Show1 (FunctionBody ty) where; liftShowsPrec = liftShowsPrec2 showsPrec showList
-instance (Eq ty, Eq tm) => Eq (FunctionBody ty tm) where; (==) = eq1
-instance (Show ty, Show tm) => Show (FunctionBody ty tm) where; showsPrec = showsPrec1
-
 data Function
   = Function
   { funcName :: Text
-  , funcBody :: FunctionBody Void Void
+  , funcTyArgs :: Vector Text
+  , funcArgs :: Vector (Text, Type (Var Int Void)) -- indices from funcTyArgs
+  , funcRetTy :: Type (Var Int Void) -- indices from funcTyArgs
+  , funcBody :: Expr (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
 data Declaration

@@ -202,18 +202,22 @@ main =
       it "id<A>(x : A) -> A" $ do
         let
           input =
-            Syntax.Function "id" $
-            Syntax.Forall "A" $
-            Syntax.Arg "x" (TVar $ B ()) $
-            Syntax.Done (TVar $ B ()) $
-            Syntax.Var (B ())
+            Syntax.Function
+            { Syntax.funcName = "id"
+            , Syntax.funcTyArgs = ["A"]
+            , Syntax.funcArgs = [("x", TVar $ B 0)]
+            , Syntax.funcRetTy = TVar $ B 0
+            , Syntax.funcBody = Syntax.Var $ B 0
+            }
           output =
-            IR.Function "id" $
-            IR.Forall "A" KType $
-            IR.Arg "x" (TVar $ B ()) $
-            IR.Constraint (CSized $ TVar $ B ()) $
-            IR.Done (TVar $ B ()) $
-            IR.Var $ B ()
+            IR.Function
+            { IR.funcName = "id"
+            , IR.funcTyArgs = [("A", KType)]
+            , IR.funcConstraints = [CSized $ TVar $ B 0]
+            , IR.funcArgs = [("x", TVar $ B 0)]
+            , IR.funcRetTy = TVar $ B 0
+            , IR.funcBody = IR.Var $ B 0
+            }
         checkFunction mempty mempty input `shouldBe` Right output
       it "check `struct Pair<A, B>(A, B)`" $ do
         let
