@@ -91,13 +91,13 @@ main =
              (TVar $ B ())
           )
     describe "entailment" $ do
-      it "simplify { (64, Sized U64) } (d0 : Sized U64) ==> [d0 := 64]" $ do
+      it "simplify { (8, Sized U64) } (d0 : Sized U64) ==> [d0 := 8]" $ do
         let
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
             { _thGlobal =
-              [ (CSized $ TUInt S64, Size.Word 64)
+              [ (CSized $ TUInt S64, Size.Word 8)
               ]
             , _thLocal = mempty
             }
@@ -106,8 +106,8 @@ main =
             (,) m <$> simplify mempty absurd absurd theory (m, CSized $ TUInt S64)
         case e_res of
           Left{} -> expectationFailure "expected success, got error"
-          Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 64 :: Size (Either SMeta Void))])
-      it "solve $ simplify { (64, Sized U64), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> [d0 := 128]" $ do
+          Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 8 :: Size (Either SMeta Void))])
+      it "solve $ simplify { (8, Sized U64), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> [d0 := 16]" $ do
         let
           kindScope =
             [ ("Pair", KArr KType $ KArr KType KType)
@@ -117,7 +117,7 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ (CSized $ TUInt S64, Size.Word 64)
+              [ (CSized $ TUInt S64, Size.Word 8)
               , ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
@@ -137,7 +137,7 @@ main =
         case e_res of
           Left err -> expectationFailure $ "expected success, got error: " <> show err
           Right (d0, (assumes, sols)) ->
-            Map.lookup d0 sols `shouldBe` Just (Size.Word 128 :: Size (Either SMeta Void))
+            Map.lookup d0 sols `shouldBe` Just (Size.Word 16 :: Size (Either SMeta Void))
       it "solve $ simplify { (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> cannot deduce  Sized U64" $ do
         let
           kindScope =
@@ -295,7 +295,7 @@ main =
               CSized $ foldl @[] TApp (TName "Sum") [TVar . F $ B (), TVar $ B ()]
             , Size.Lam $ toScope $
               Size.Lam $ toScope $
-              Size.Plus (Size.Word 8) $
+              Size.Plus (Size.Word 1) $
               Size.Max (Size.Var $ F $ B ()) (Size.Var $ B ())
             )
       it "check `struct Box<A>(Ptr<A>)`" $ do
@@ -315,5 +315,5 @@ main =
             -- forall t0. Sized (Box t0)
             , CForall Nothing KType .
               CSized $ foldl @[] TApp (TName "Box") [TVar $ B ()]
-            , Size.Word 64
+            , Size.Word 8
             )

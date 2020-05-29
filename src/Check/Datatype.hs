@@ -288,7 +288,7 @@ checkADT kScope datatypeName paramNames ctors = do
         Syntax.End ->
           pure $!
           if ctorCount > 1
-          then (usedConstraints, plusSize (Word 8) sz)
+          then (usedConstraints, plusSize (Word 1) sz) -- 1 byte tag
           else (usedConstraints, sz)
         Syntax.Ctor _ctorName ctorArgs ctorRest -> do
           traverse_

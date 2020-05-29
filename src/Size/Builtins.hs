@@ -26,7 +26,7 @@ ptrSize :: (Constraint Void, Size Void)
 ptrSize =
   ( CForall Nothing KType $
     CSized $ TApp TPtr (TVar $ B ())
-  , Size.Word 64
+  , Size.Word 8
   )
 
 boolSize :: (Constraint Void, Size Void)

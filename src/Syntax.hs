@@ -26,10 +26,10 @@ data WordSize
 wordSize :: WordSize -> Word64
 wordSize w =
   case w of
-    S8 -> 8
-    S16 -> 16
-    S32 -> 32
-    S64 -> 64
+    S8 -> 1
+    S16 -> 2
+    S32 -> 4
+    S64 -> 8
 
 wordSizes :: [WordSize]
 wordSizes = [S8, S16, S32, S64]
