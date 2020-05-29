@@ -27,7 +27,7 @@ import Bound.Var (Var(..), unvar)
 import Control.Applicative (empty)
 import Control.Lens.Getter (use)
 import Control.Lens.Lens (Lens')
-import Control.Lens.Setter ((.=), over, mapped)
+import Control.Lens.Setter ((.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad (guard)
 import Control.Monad.Except (MonadError, runExceptT, throwError)
@@ -45,11 +45,12 @@ import Check.TypeError (TypeError(..))
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import TCState
-  ( TCState, TMeta(..), emptyTCState, TMeta, pattern TypeM
+  ( TCState, TMeta(..), TMeta, pattern TypeM
   , HasTypeMetas(..), HasKindMetas(..)
   , freshTMeta
-  , filterTypeSolutions
+  , FilterTypes, filterTypes, mapTypes
   , solveMetas_Constraint
+  , tcsGlobalTheory
   )
 import Typecheck (renderTyName, unifyType)
 
@@ -75,6 +76,9 @@ class HasGlobalTheory s where
 
 instance HasGlobalTheory (Theory ty) where
   globalTheory = thGlobal
+
+instance HasGlobalTheory (TCState ty) where
+  globalTheory = tcsGlobalTheory
 
 insertLocal :: Ord ty => Constraint ty -> SMeta -> Theory ty -> Theory ty
 insertLocal k v (Theory gbl lcl) = Theory gbl (Map.insert k v lcl)
@@ -105,36 +109,39 @@ composeSSubs ::
 composeSSubs a b =
   fmap (applySSubs a) b <> a
 
-data EntailState ty
+data EntailState tc ty
   = EntailState
-  { _entailTCState :: TCState ty
+  { _entailTCState :: tc ty
   , _entailSizeMeta :: SMeta
   , _entailGlobalTheory :: Map (Constraint Void) (Size Void)
   }
 makeLenses ''EntailState
 
-instance HasGlobalTheory (EntailState ty) where
+instance HasGlobalTheory (tc ty) => HasGlobalTheory (EntailState tc ty) where
   globalTheory = entailGlobalTheory
+
+instance FilterTypes tc => FilterTypes (EntailState tc) where
+  filterTypes f es = es { _entailTCState = filterTypes f $ _entailTCState es }
 
 class HasSizeMetas s where
   nextSMeta :: Lens' s SMeta
 
-instance HasTypeMetas EntailState where
+instance HasTypeMetas tc => HasTypeMetas (EntailState tc) where
   nextTMeta = entailTCState.nextTMeta
   tmetaKinds = entailTCState.tmetaKinds
   tmetaSolutions = entailTCState.tmetaSolutions
 
-instance HasKindMetas (EntailState ty) where
+instance HasKindMetas (tc ty) => HasKindMetas (EntailState tc ty) where
   nextKMeta = entailTCState.nextKMeta
   kmetaSolutions = entailTCState.kmetaSolutions
 
-instance HasSizeMetas (EntailState ty) where
+instance HasSizeMetas (EntailState tc ty) where
   nextSMeta = entailSizeMeta
 
-emptyEntailState :: EntailState ty
-emptyEntailState =
+emptyEntailState :: tc ty -> EntailState tc ty
+emptyEntailState tc =
   EntailState
-  { _entailTCState = emptyTCState
+  { _entailTCState = tc
   , _entailSizeMeta = SMeta 0
   , _entailGlobalTheory = mempty
   }
@@ -150,7 +157,7 @@ withoutMetas f = traverse (either (const Nothing) (Just . f))
 
 solve ::
   ( MonadState (s ty) m
-  , HasTypeMetas s
+  , FilterTypes s, HasTypeMetas s
   , forall x. HasKindMetas (s x), forall x. HasSizeMetas (s x)
   , MonadError TypeError m
   , Ord ty
@@ -219,7 +226,7 @@ entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
 
 simplify ::
   ( MonadState (s ty) m
-  , HasTypeMetas s
+  , FilterTypes s, HasTypeMetas s
   , forall x. HasKindMetas (s x), forall x. HasSizeMetas (s x)
   , MonadError TypeError m
   , Ord ty
@@ -239,14 +246,14 @@ simplify kindScope tyNames kinds theory (consVar, cons) =
       ameta <- freshSMeta
       es <- get
       ((aAssumes, asubs), es') <-
-        flip runStateT (over (tmetaSolutions.mapped.mapped) F es) $
+        flip runStateT (mapTypes F es) $
         simplify
           kindScope
           (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
           (unvar (\() -> k) kinds)
           (mapTy (fmap F) theory)
           (ameta, sequence <$> a)
-      put $ filterTypeSolutions (unvar (\() -> Nothing) Just) es'
+      put $ filterTypes (unvar (\() -> Nothing) Just) es'
       pure
         ( (fmap.fmap) (CForall m_n k . fmap sequence) aAssumes
         , Map.singleton consVar (fromMaybe (error "ameta not solved") $ Map.lookup ameta asubs)

@@ -13,14 +13,14 @@ module Typecheck
   , CheckResult(..), InferResult(..)
   , checkExpr
   , inferExpr
-  , checkFunction
+  , zonkExprTypes
   )
 where
 
-import Bound.Var (Var(..), unvar)
-import Control.Lens.Setter ((%=), over, mapped)
+import Bound.Var (unvar)
+import Control.Lens.Setter ((%=), (<>=))
 import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.State (MonadState, evalStateT, runStateT)
+import Control.Monad.State (MonadState)
 import Data.Foldable (foldlM, traverse_)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Map (Map)
@@ -29,14 +29,12 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import Data.Word (Word8, Word16, Word32, Word64)
 
-import Check.Kind (checkKind, inferKind, unifyKind)
+import Check.Kind (inferKind, unifyKind)
 import Check.TypeError (TypeError(..))
-import Syntax (Type)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
@@ -44,12 +42,11 @@ import Size (sizeConstraintFor)
 import TCState
   ( TMeta
   , TypeM, pattern TypeM, unTypeM
-  , TCState, emptyTCState
-  , HasKindMetas, HasTypeMetas
+  , HasKindMetas, HasTypeMetas, HasConstraints
   , tmetaSolutions
-  , getTMeta, getKMeta
-  , freshTMeta, freshKMeta
-  , filterTypeSolutions
+  , getTMeta
+  , freshTMeta
+  , requiredConstraints
   )
 
 applyTSubs_Constraint ::
@@ -159,20 +156,19 @@ data InferResult ty tm
   = InferResult
   { irExpr :: IR.Expr (Either TMeta ty) tm
   , irType :: TypeM ty
-  , irConstraints :: Set (IR.Constraint (Either TMeta ty))
   }
 
 instantiateScheme ::
-  (MonadState (s ty) m, HasTypeMetas s) =>
+  (MonadState (s ty) m, HasTypeMetas s, Ord ty) =>
   TypeScheme Void ->
-  m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
+  m ([TMeta], Set (IR.Constraint (Either TMeta ty)), TypeM ty)
 instantiateScheme = go (Right . absurd)
   where
     go ::
-      (MonadState (s ty) m, HasTypeMetas s) =>
+      (MonadState (s ty) m, HasTypeMetas s, Ord ty) =>
       (x -> Either TMeta ty) ->
       TypeScheme x ->
-      m ([TMeta], Vector (IR.Constraint (Either TMeta ty)), TypeM ty)
+      m ([TMeta], Set (IR.Constraint (Either TMeta ty)), TypeM ty)
     go var scheme =
       case scheme of
         IR.SForall _ k rest -> do
@@ -182,7 +178,7 @@ instantiateScheme = go (Right . absurd)
         IR.SDone constraints argTys ty ->
           pure
             ( []
-            , (fmap.fmap) var constraints
+            , foldr (\c -> Set.insert $ fmap var c) mempty constraints
             , TypeM $
               Syntax.TApp
                 (Syntax.TFun $ fmap var <$> argTys)
@@ -190,7 +186,8 @@ instantiateScheme = go (Right . absurd)
             )
 
 inferExpr ::
-  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
+  ( MonadState (s ty) m
+  , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -210,7 +207,6 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       InferResult
       { irExpr = IR.Var a
       , irType = types a
-      , irConstraints = mempty
       }
 
     Syntax.Name name -> do
@@ -220,54 +216,51 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
             Nothing -> throwError $ NotInScope name
             Just scheme -> do
               (metas, constraints, bodyTy) <- instantiateScheme scheme
+              requiredConstraints <>= constraints
               pure $
                 InferResult
                 { irExpr = IR.Inst name $ Syntax.TVar . Left <$> Vector.fromList metas
                 , irType = bodyTy
-                , irConstraints = foldr Set.insert mempty constraints
                 }
         Just ty ->
           pure $
             InferResult
             { irExpr = IR.Name name
             , irType = ty
-            , irConstraints = mempty
             }
 
     Syntax.Let bindings body -> do
-      (letScope', bindings', constraints) <-
+      (letScope', bindings') <-
         foldlM
-          (\(acc, bs, cs) (n, b) -> do
+          (\(acc, bs) (n, b) -> do
              bResult <- inferExpr kindScope tyScope acc tyNames tmNames kinds types b
+             requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType bResult)
              pure
                ( Map.insert n (irType bResult) acc
                , Vector.snoc bs (n, irExpr bResult)
-               , irConstraints bResult <> cs
                )
           )
-          (mempty, mempty, mempty)
+          (mempty, mempty)
           bindings
       bodyResult <- inferExpr kindScope tyScope letScope' tyNames tmNames kinds types body
       pure $
         InferResult
         { irExpr = IR.Let bindings' $ irExpr bodyResult
         , irType = irType bodyResult
-        , irConstraints = irConstraints bodyResult <> constraints
         }
 
     Syntax.Call fun args -> do
       funResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types fun
-      (args', argTys, constraints) <-
+      (args', argTys) <-
         foldlM
-          (\(as, atys, cs) arg -> do
+          (\(as, atys) arg -> do
              argResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types arg
              pure
                ( Vector.snoc as $ irExpr argResult
                , Vector.snoc atys . unTypeM $ irType argResult
-               , irConstraints argResult <> cs
                )
           )
-          (mempty, mempty, irConstraints funResult)
+          (mempty, mempty)
           args
       meta <- freshTMeta KType
       unifyType
@@ -280,7 +273,6 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         InferResult
         { irExpr = IR.Call (irExpr funResult) args'
         , irType = TypeM . Syntax.TVar $ Left meta
-        , irConstraints = constraints
         }
 
     Syntax.Number{} -> throwError $ Can'tInfer (tmNames <$> expr)
@@ -290,7 +282,6 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       InferResult
       { irExpr = IR.BTrue
       , irType = TypeM Syntax.TBool
-      , irConstraints = mempty
       }
 
     Syntax.BFalse ->
@@ -298,16 +289,15 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       InferResult
       { irExpr = IR.BTrue
       , irType = TypeM Syntax.TBool
-      , irConstraints = mempty
       }
 
     Syntax.New a -> do
       aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
+      requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType aResult)
       pure $
         InferResult
         { irExpr = IR.New $ irExpr aResult
         , irType = TypeM $ Syntax.TApp Syntax.TPtr (unTypeM $ irType aResult)
-        , irConstraints = irConstraints aResult
         }
 
     Syntax.Deref a -> do
@@ -323,7 +313,6 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         InferResult
         { irExpr = IR.Deref $ irExpr aResult
         , irType = TypeM $ Syntax.TVar (Left meta)
-        , irConstraints = irConstraints aResult
         }
 
 data CheckResult ty tm
@@ -332,7 +321,8 @@ data CheckResult ty tm
   }
 
 checkExpr ::
-  ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
+  ( MonadState (s ty) m
+  , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -454,103 +444,3 @@ zonkExprTypes e =
     IR.BFalse -> pure $ IR.BFalse
     IR.New a -> IR.New <$> zonkExprTypes a
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
-
-checkFunctionBody ::
-  ( MonadError TypeError m
-  , Ord ty
-  ) =>
-  TCState ty ->
-  Map Text Kind ->
-  Map Text (TypeScheme Void) ->
-  (ty -> Text) ->
-  (tm -> Text) ->
-  (ty -> Kind) ->
-  (tm -> TypeM ty) ->
-  Text ->
-  (TypeScheme ty -> TypeScheme Void) ->
-  Vector (Type ty) ->
-  Syntax.FunctionBody ty tm ->
-  m (IR.FunctionBody ty tm, TCState ty)
-checkFunctionBody tcstate kindScope tyScope tyNames argNames kinds types name mkScheme args fb =
-  case fb of
-    Syntax.Forall tyName rest -> do
-      (meta, tcstate') <- runStateT freshKMeta tcstate
-      (rest', tcstate'') <-
-        checkFunctionBody
-          (over (tmetaSolutions.mapped.mapped) F tcstate')
-          kindScope
-          tyScope
-          (unvar (\() -> tyName) tyNames)
-          argNames
-          (unvar (\() -> KVar meta) kinds)
-          (fmap F . types)
-          name
-          (mkScheme . IR.SForall tyName (KVar meta))
-          ((fmap.fmap) F args)
-          rest
-      m_k <- evalStateT (getKMeta meta) tcstate''
-      case m_k of
-        Nothing -> error $ "unsolved: " <> show meta
-        Just k ->
-          pure
-            ( IR.Forall tyName k $
-              IR.Constraint (sizeConstraintFor k) $
-              rest'
-            , filterTypeSolutions (unvar (\() -> Nothing) Just) tcstate''
-            )
-    Syntax.Arg argName argTy rest -> do
-      let argTy' = TypeM $ Right <$> argTy
-      ((), tcstate') <-
-        flip runStateT tcstate $
-        checkKind kindScope kinds argTy' KType
-      (rest', tcstate'') <-
-        checkFunctionBody
-          tcstate'
-          kindScope
-          tyScope
-          tyNames
-          (unvar (\() -> argName) argNames)
-          kinds
-          (unvar (\() -> argTy') types)
-          name
-          mkScheme
-          (Vector.snoc args argTy)
-          rest
-      pure (IR.Arg argName argTy rest', tcstate'')
-    Syntax.Done retTy expr ->
-      flip runStateT tcstate $ do
-        exprResult <-
-          checkExpr
-            kindScope
-            (Map.insert name (mkScheme $ IR.SDone mempty args retTy) tyScope) -- for recursive calls
-            mempty
-            tyNames
-            argNames
-            kinds
-            types
-            expr
-            (TypeM $ Right <$> retTy)
-        expr' <- zonkExprTypes (crExpr exprResult)
-        pure (IR.Done retTy expr')
-
-checkFunction ::
-  MonadError TypeError m =>
-  Map Text Kind ->
-  Map Text (TypeScheme Void) ->
-  Syntax.Function ->
-  m IR.Function
-checkFunction kindScope tyScope (Syntax.Function name body) = do
-  (body', _) <-
-    checkFunctionBody
-      emptyTCState
-      kindScope
-      tyScope
-      absurd
-      absurd
-      absurd
-      absurd
-      name
-      id
-      mempty
-      body
-  pure $ IR.Function name body'

@@ -19,9 +19,10 @@ import Check.Datatype (checkADT)
 import Check.Entailment
   ( SMeta(..), Theory(..)
   , composeSSubs
-  , emptyEntailState, entailGlobalTheory
+  , emptyEntailState, globalTheory
   , freshSMeta, simplify, solve
   )
+import Check.Function (checkFunction)
 import Check.TypeError (TypeError(..))
 import Size ((.@), Size)
 import qualified Size (Size(..), pattern Var)
@@ -30,8 +31,8 @@ import IR (Constraint(..), Kind(..))
 import qualified IR
 import Syntax (Type(..), WordSize(..))
 import qualified Syntax
-import TCState (TMeta)
-import Typecheck (checkFunction, sizeConstraintFor)
+import TCState (TMeta, emptyTCState)
+import Typecheck (sizeConstraintFor)
 
 main :: IO ()
 main =
@@ -100,7 +101,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState emptyEntailState . runExceptT $ do
+          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (,) m <$> simplify mempty absurd absurd theory (m, CSized $ TUInt S64)
         case e_res of
@@ -126,7 +127,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState emptyEntailState . runExceptT $ do
+          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -156,7 +157,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState emptyEntailState . runExceptT $ do
+          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -181,7 +182,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState emptyEntailState . runExceptT $ do
+          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -209,15 +210,15 @@ main =
           output =
             IR.Function "id" $
             IR.Forall "A" KType $
-            IR.Constraint (CSized $ TVar $ B ()) $
             IR.Arg "x" (TVar $ B ()) $
+            IR.Constraint (CSized $ TVar $ B ()) $
             IR.Done (TVar $ B ()) $
             IR.Var $ B ()
         checkFunction mempty mempty input `shouldBe` Right output
       it "check `struct Pair<A, B>(A, B)`" $ do
         let
           result =
-            flip evalStateT emptyEntailState $
+            flip evalStateT (emptyEntailState emptyTCState) $
             checkADT
               mempty
               "Pair"
@@ -237,7 +238,7 @@ main =
       it "check `struct Pair<F, A, B>(F<A>, F<B>)`" $ do
         let
           result =
-            flip evalStateT emptyEntailState $
+            flip evalStateT (emptyEntailState emptyTCState) $
             checkADT
               mempty
               "Pair"
@@ -272,7 +273,7 @@ main =
       it "check `struct Sum<A, B>{ Left(A), Right(B) }`" $ do
         let
           result =
-            flip evalStateT emptyEntailState $
+            flip evalStateT (emptyEntailState emptyTCState) $
             checkADT
               mempty
               "Sum"
@@ -296,7 +297,7 @@ main =
       it "check `struct Box<A>(Ptr<A>)`" $ do
         let
           result =
-            flip evalStateT (emptyEntailState & entailGlobalTheory .~ Map.fromList Size.builtins) $
+            flip evalStateT (emptyEntailState emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
             checkADT
               mempty
               "Box"

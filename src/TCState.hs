@@ -7,8 +7,15 @@ module TCState
   ( TMeta(..), TypeM, pattern TypeM, unTypeM
   , TCState
   , emptyTCState
-  , HasTypeMetas(..), HasKindMetas(..)
-  , filterTypeSolutions
+  , tcsKindMeta
+  , tcsKindSolutions
+  , tcsTypeMeta
+  , tcsTypeMetaKinds
+  , tcsTypeSolutions
+  , tcsConstraints
+  , tcsGlobalTheory
+  , HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
+  , FilterTypes(..), mapTypes
   , freshTMeta, freshKMeta
   , getTMeta, getKMeta
   , getTMetaKind
@@ -21,20 +28,23 @@ where
 import Bound.Var (Var(..))
 import Control.Applicative (empty)
 import Control.Lens.Getter ((^.), use)
-import Control.Lens.Lens (Lens, Lens')
-import Control.Lens.Setter ((.~), (%=), (.=))
+import Control.Lens.Lens (Lens')
+import Control.Lens.Setter ((%=), (.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Control.Monad.State (MonadState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Foldable (foldl')
-import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.Void (Void)
 
-import IR (KMeta(..), Kind(..))
+import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
+import Size (Size)
 import Syntax (Type(..))
 
 newtype TMeta = TMeta Int
@@ -56,10 +66,12 @@ data TCState ty
   , _tcsTypeMeta :: TMeta
   , _tcsTypeMetaKinds :: Map TMeta Kind
   , _tcsTypeSolutions :: Map TMeta (TypeM ty)
+  , _tcsConstraints :: Set (Constraint (Either TMeta ty))
+  , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
   }
 makeLenses ''TCState
 
-emptyTCState :: TCState ty
+emptyTCState :: Ord ty => TCState ty
 emptyTCState =
   TCState
   { _tcsKindMeta = KMeta 0
@@ -67,12 +79,26 @@ emptyTCState =
   , _tcsTypeMeta = TMeta 0
   , _tcsTypeMetaKinds = mempty
   , _tcsTypeSolutions = mempty
+  , _tcsConstraints = mempty
+  , _tcsGlobalTheory = mempty
   }
+
+class FilterTypes s where
+  filterTypes :: Ord ty' => (ty -> Maybe ty') -> s ty -> s ty'
+
+mapTypes :: (FilterTypes s, Ord ty') => (ty -> ty') -> s ty -> s ty'
+mapTypes f = filterTypes (Just . f)
+
+class HasConstraints s where
+  requiredConstraints :: Lens' (s ty) (Set (Constraint (Either TMeta ty)))
+
+instance HasConstraints TCState where
+  requiredConstraints = tcsConstraints
 
 class HasTypeMetas s where
   nextTMeta :: Lens' (s ty) TMeta
   tmetaKinds :: Lens' (s ty) (Map TMeta Kind)
-  tmetaSolutions :: Lens (s ty) (s ty') (Map TMeta (TypeM ty)) (Map TMeta (TypeM ty'))
+  tmetaSolutions :: Lens' (s ty) (Map TMeta (TypeM ty))
 
 instance HasTypeMetas TCState where
   nextTMeta = tcsTypeMeta
@@ -87,23 +113,34 @@ instance HasKindMetas (TCState ty) where
   nextKMeta = tcsKindMeta
   kmetaSolutions = tcsKindSolutions
 
-filterTypeSolutions :: HasTypeMetas s => (ty -> Maybe ty') -> s ty -> s ty'
-filterTypeSolutions f tcs =
-  let
-    (tmetas, sols') =
-      Map.foldrWithKey
-        (\k a (ms, ss) ->
-           case traverse f a of
-             Nothing -> (k:ms, ss)
-             Just a' -> (ms, Map.insert k a' ss)
-        )
-        ([], mempty)
-        (tcs ^. tmetaSolutions)
-    kinds' = foldl' (flip Map.delete) (tcs ^. tmetaKinds) tmetas
-  in
-    tcs &
-    tmetaKinds .~ kinds' &
-    tmetaSolutions .~ sols'
+instance FilterTypes TCState where
+  filterTypes f tcs =
+    let
+      (tmetas, sols') =
+        Map.foldrWithKey
+          (\k a (ms, ss) ->
+            case traverse f a of
+              Nothing -> (k:ms, ss)
+              Just a' -> (ms, Map.insert k a' ss)
+          )
+          ([], mempty)
+          (tcs ^. tcsTypeSolutions)
+      kinds' = foldl' (flip Map.delete) (tcs ^. tcsTypeMetaKinds) tmetas
+      constraints' =
+        foldr
+          (\c ->
+             case traverse (either (Just . Left) (fmap Right . f)) c of
+               Nothing -> id
+               Just c' -> Set.insert c'
+          )
+          mempty
+          (tcs ^. tcsConstraints)
+    in
+      tcs
+      { _tcsTypeMetaKinds = kinds'
+      , _tcsTypeSolutions = sols'
+      , _tcsConstraints = constraints'
+      }
 
 freshKMeta :: (MonadState s m, HasKindMetas s) => m KMeta
 freshKMeta = do

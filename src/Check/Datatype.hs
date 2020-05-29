@@ -40,7 +40,7 @@ import Syntax (Type(..))
 import qualified Syntax
 import TCState
   ( TMeta, pattern TypeM
-  , HasKindMetas, HasTypeMetas
+  , FilterTypes, HasKindMetas, HasTypeMetas
   , freshKMeta
   , solveKMetas
   )
@@ -48,6 +48,7 @@ import TCState
 makeSizeTerm ::
   forall s m.
   ( MonadState (s (Var Int Void)) m
+  , FilterTypes s
   , HasTypeMetas s
   , forall x. HasKindMetas (s x)
   , forall x. HasSizeMetas (s x)
@@ -166,6 +167,7 @@ makeSizeConstraint paramKinds as =
 checkADT ::
   forall s m.
   ( MonadState (s (Var Int Void)) m
+  , FilterTypes s
   , HasTypeMetas s
   , forall x. HasKindMetas (s x)
   , forall x. HasSizeMetas (s x)
