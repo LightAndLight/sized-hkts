@@ -333,8 +333,10 @@ checkExpr ::
   m (CheckResult ty tm)
 checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
   case expr of
-    Syntax.Number n ->
+    Syntax.Number n -> do
       case unTypeM ty of
+        Syntax.TVar (Left m) ->
+          checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr (_ m)
         Syntax.TUInt sz ->
           case sz of
             Syntax.S8 ->
@@ -404,6 +406,25 @@ checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
                 }
               else throwError $ OutOfBoundsUnsigned sz n
         _ -> throwError $ NotNumeric (tyNames <$> ty)
+    Syntax.Call name args -> do
+      name' <-
+        inferExpr
+          kindScope
+          tyScope
+          letScope
+          tyNames
+          tmNames
+          kinds
+          types
+          name
+      expectedArgs <- fmap (Syntax.TVar . Left) <$> Vector.replicateM (length args) (freshTMeta KType)
+      let expected = Syntax.TApp (Syntax.TFun expectedArgs) (unTypeM ty)
+      unifyType kindScope (Right . tyNames) kinds (TypeM expected) (irType name')
+      args' <-
+        traverse
+          (\(e, t) -> checkExpr kindScope tyScope letScope tyNames tmNames kinds types e (TypeM t))
+          (Vector.zip args expectedArgs)
+      pure $ CheckResult { crExpr = IR.Call (irExpr name') (crExpr <$> args') }
     _ -> do
       exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
       unifyType kindScope (Right . tyNames) kinds ty (irType exprResult)

@@ -200,6 +200,7 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
       EQ -> do
         let
           inst = unvar (tyArgs' Vector.!) absurd
+          -- constraints_inst = IR.bindConstraint inst <$> _constraints
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst
           body_inst = IR.bindType_Expr inst body

@@ -1,5 +1,6 @@
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
+{-# language QuantifiedConstraints #-}
 {-# language TypeApplications #-}
 module Check.Function
   (checkFunction)
@@ -7,9 +8,11 @@ where
 
 import Bound.Var (unvar)
 import Control.Lens.Getter (use)
+import Control.Lens.Setter ((.~))
 import Control.Monad.Except (MonadError)
-import Control.Monad.State (evalStateT)
+import Control.Monad.State (MonadState, evalStateT)
 import Data.Foldable (foldlM, foldrM, traverse_)
+import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -17,7 +20,7 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.Entailment (Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
+import Check.Entailment (HasGlobalTheory, Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
 import Check.Kind (checkKind)
 import Check.TypeError (TypeError(..))
 import qualified Syntax
@@ -34,14 +37,17 @@ import TCState
 import Typecheck (CheckResult(..), checkExpr, zonkExprTypes)
 
 checkFunction ::
-  MonadError TypeError m =>
+  ( MonadState (s ty) m, forall x. HasGlobalTheory (s x)
+  , MonadError TypeError m
+  ) =>
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Syntax.Function ->
   m IR.Function
 checkFunction kindScope tyScope (Syntax.Function name tyArgs args retTy body) = do
+  glbl <- use globalTheory
   (tyArgs', constraints', body') <-
-    flip evalStateT (emptyEntailState emptyTCState) $ do
+    flip evalStateT (emptyEntailState emptyTCState & globalTheory .~ glbl) $ do
       tyArgKinds <- traverse (fmap KVar . const freshKMeta) tyArgs
       let args' = TypeM . fmap Right . snd <$> args
       let retTy' = TypeM $ Right <$> retTy

@@ -24,6 +24,8 @@ import Check.Entailment
   )
 import Check.Function (checkFunction)
 import Check.TypeError (TypeError(..))
+import qualified Codegen.C as C
+import qualified Compile
 import Size ((.@), Size)
 import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
@@ -218,7 +220,31 @@ main =
             , IR.funcRetTy = TVar $ B 0
             , IR.funcBody = IR.Var $ B 0
             }
-        checkFunction mempty mempty input `shouldBe` Right output
+        evalStateT (checkFunction mempty mempty input) (emptyTCState @Void) `shouldBe`
+          Right output
+      it "five() -> int32" $ do
+        let
+          input =
+            Syntax.Function
+            { Syntax.funcName = "five"
+            , Syntax.funcTyArgs = []
+            , Syntax.funcArgs = []
+            , Syntax.funcRetTy = TInt S32
+            , Syntax.funcBody = Syntax.Number 5
+            }
+          output =
+            IR.Function
+            { IR.funcName = "five"
+            , IR.funcTyArgs = []
+            , IR.funcConstraints = []
+            , IR.funcArgs = []
+            , IR.funcRetTy = TInt S32
+            , IR.funcBody = IR.Int32 5
+            }
+        evalStateT
+          (checkFunction mempty mempty input)
+          (emptyTCState @Void & globalTheory .~ Map.fromList Size.builtins) `shouldBe`
+          Right output
       it "check `struct Pair<A, B>(A, B)`" $ do
         let
           result =
@@ -317,3 +343,59 @@ main =
               CSized $ foldl @[] TApp (TName "Box") [TVar $ B ()]
             , Size.Word 8
             )
+    describe "compile" $ do
+      it "1" $ do
+        let
+          input =
+            [ Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcBody = Syntax.Number 0
+              }
+            ]
+          output =
+            C.preamble <>
+            [ C.Function C.Int32 "main" []
+              [ C.Return $ C.Number 0
+              ]
+            ]
+        case Compile.compile input of
+          Left err -> expectationFailure $ "Expected success, got " <> show err
+          Right code ->
+            code `shouldBe` output
+      it "2" $ do
+        let
+          input =
+            [ Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "id"
+              , Syntax.funcTyArgs = ["A"]
+              , Syntax.funcArgs = [("x", TVar $ B 0)]
+              , Syntax.funcRetTy = TVar $ B 0
+              , Syntax.funcBody = Syntax.Var $ B 0
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcBody = Syntax.Call (Syntax.Name "id") [Syntax.Number 0]
+              }
+            ]
+          output =
+            C.preamble <>
+            [ C.Function C.Int32 "id_Int32" [(C.Int32, "x")]
+              [ C.Return $ C.Var "x"
+              ]
+            , C.Function C.Int32 "main" []
+              [ C.Return $ C.Call (C.Var "id") [C.Number 0]
+              ]
+            ]
+        case Compile.compile input of
+          Left err -> expectationFailure $ "Expected success, got " <> show err
+          Right code ->
+            code `shouldBe` output
