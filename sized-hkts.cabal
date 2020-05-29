@@ -22,6 +22,8 @@ library
                      , Check.Function
                      , Check.Kind
                      , Check.TypeError
+                     , Codegen
+                     , Codegen.C
                      , Compile
                      , IR
                      , Size

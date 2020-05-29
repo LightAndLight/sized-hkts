@@ -1,4 +1,5 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# language OverloadedStrings #-}
 {-# language TemplateHaskell #-}
 module Syntax where
 
@@ -6,8 +7,11 @@ import Bound.TH (makeBound)
 import Bound.Var (Var)
 import Control.Monad (ap)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1)
+import Data.Foldable (fold)
 import Data.Functor.Classes (eq1, compare1, showsPrec1)
+import qualified Data.List as List
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Vector (Vector)
 import Data.Void (Void)
 import Data.Word (Word64)
@@ -47,6 +51,33 @@ deriveShow1 ''Type
 instance Eq a => Eq (Type a) where; (==) = eq1
 instance Ord a => Ord (Type a) where; compare = compare1
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
+
+parens :: Text -> Text
+parens a = "(" <> a <> ")"
+
+prettyType :: (a -> Text) -> Type a -> Text
+prettyType var ty =
+  case ty of
+    TVar a -> var a
+    TApp a b ->
+      prettyType var a <>
+      " " <>
+      (case b of
+         TApp{} -> parens
+         _ -> id
+      ) (prettyType var b)
+    TUInt ws -> Text.pack $ "uint" <> show (wordSize ws)
+    TInt ws -> Text.pack $ "int" <> show (wordSize ws)
+    TBool -> "bool"
+    TPtr -> "ptr"
+    TFun args ->
+      "fun(" <>
+      fold
+        (List.intersperse ", " $
+         foldr ((:) . prettyType var) [] args
+        ) <>
+      ")"
+    TName n -> n
 
 data Ctors a
   = End

@@ -45,6 +45,27 @@ instance (Show ty) => Show1 (Expr ty) where; liftShowsPrec = liftShowsPrec2 show
 instance (Eq ty, Eq tm) => Eq (Expr ty tm) where; (==) = eq1
 instance (Show ty, Show tm) => Show (Expr ty tm) where; showsPrec = showsPrec1
 
+bindType_Expr :: (ty -> Type ty') -> Expr ty tm -> Expr ty' tm
+bindType_Expr f e =
+  case e of
+    Var a -> Var a
+    Name a -> Name a
+    Let es b -> Let ((fmap.fmap) (bindType_Expr f) es) (bindType_Expr f b)
+    Inst n ts -> Inst n ((>>= f) <$> ts)
+    Call a bs -> Call (bindType_Expr f a) (bindType_Expr f <$> bs)
+    UInt8 ws -> UInt8 ws
+    UInt16 ws -> UInt16 ws
+    UInt32 ws -> UInt32 ws
+    UInt64 ws -> UInt64 ws
+    Int8 ws -> Int8 ws
+    Int16 ws -> Int16 ws
+    Int32 ws -> Int32 ws
+    Int64 ws -> Int64 ws
+    BTrue -> BTrue
+    BFalse -> BFalse
+    New a -> New $ bindType_Expr f a
+    Deref a -> Deref $ bindType_Expr f a
+
 newtype KMeta = KMeta Int
   deriving (Eq, Ord, Show)
 
