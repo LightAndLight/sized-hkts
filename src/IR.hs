@@ -4,6 +4,8 @@
 module IR where
 
 import Bound.Var (Var(..), unvar)
+import Control.Lens.Setter (over, mapped)
+import Control.Lens.Tuple (_1)
 import Data.Bifunctor (bimap)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1, deriveEq2, deriveShow2)
 import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compare1, showsPrec1)
@@ -122,11 +124,20 @@ data Function
         (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
+data Ctor
+  = Ctor
+  { ctorName :: Text
+  , ctorTyArgs :: Vector (Text, Kind)
+  , ctorConstraints :: Vector (Constraint (Var Int Void)) -- indices from ctorTyArgs
+  , ctorArgs :: Vector (Text, Type (Var Int Void)) -- indices from ctorTyArgs
+  , ctorRetTy :: Type (Var Int Void) -- indices from ctorTyArgs
+  } deriving (Eq, Show)
+
 data TypeScheme ty
   = TypeScheme
   { schemeTyArgs :: Vector (Text, Kind)
   , schemeConstraints :: Vector (Constraint (Var Int ty)) -- indices from schemeTyArgs
-  , schemeArgs :: Vector (Text, Type (Var Int ty)) -- indices from schemeTyArgs
+  , schemeArgs :: Vector (Maybe Text, Type (Var Int ty)) -- indices from schemeTyArgs
   , schemeRetTy :: Type (Var Int ty) -- indices from schemeTyArgs
   }
 deriveEq1 ''TypeScheme
@@ -136,4 +147,4 @@ instance Show ty => Show (TypeScheme ty) where; showsPrec = showsPrec1
 
 toTypeScheme :: Function -> TypeScheme Void
 toTypeScheme (Function _ tyArgs constrs args ret _) =
-  TypeScheme tyArgs constrs args ret
+  TypeScheme tyArgs constrs (over (mapped._1) Just args) ret

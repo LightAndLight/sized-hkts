@@ -38,7 +38,11 @@ compile decls = do
     flip runStateT (emptyEntailState emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
     checkDecls mempty mempty decls
   let
-    funcsMap = foldl' (\acc f -> Map.insert (IR.funcName f) f acc) mempty funcs
+    funcsMap =
+      foldl'
+        (\acc f -> Map.insert (IR.funcName f) f acc)
+        mempty
+        funcs
     initialCode =
       Codegen.emptyCode &
         codeKinds .~ kindScope &
@@ -66,16 +70,23 @@ compile decls = do
       Map Text IR.Kind ->
       Map Text (IR.TypeScheme Void) ->
       [Syntax.Declaration] ->
-      m (Map Text IR.Kind, Map Text (IR.TypeScheme Void), [IR.Function])
+      m
+        ( Map Text IR.Kind
+        , Map Text (IR.TypeScheme Void)
+        , [Either IR.Ctor IR.Function]
+        )
     checkDecls kindScope tyScope ds =
       case ds of
         [] -> pure (kindScope, tyScope, [])
         d:rest ->
           case d of
             Syntax.DData (Syntax.ADT name params ctors) -> do
-              (kind, axiom, size) <- checkADT kindScope name params ctors
+              (ctorsFuncs, kind, axiom, size) <- checkADT kindScope name params ctors
               globalTheory %= Map.insert axiom size
-              checkDecls (Map.insert name kind kindScope) tyScope rest
+              checkDecls
+                (Map.insert name kind kindScope)
+                (ctorsFuncs <> tyScope)
+                rest
             Syntax.DFunc func -> do
               func' <- checkFunction kindScope tyScope func
               (kindScope', tyScope', rest') <-

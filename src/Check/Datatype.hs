@@ -34,7 +34,8 @@ import Check.Entailment
   )
 import Check.Kind (checkKind, unifyKind)
 import Check.TypeError (TypeError)
-import IR (Constraint(..), KMeta, Kind(..), substKMeta)
+import IR (Constraint(..), KMeta, Kind(..), TypeScheme, substKMeta)
+import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
 import Syntax (Type(..))
 import qualified Syntax
@@ -165,6 +166,7 @@ makeSizeConstraint paramKinds as =
             abstractVars freeVars hd'
 
 -- | Check that an ADT is well formed, and return
+-- * type schemes for each of its constructors
 -- * its kind
 -- * its axiom type
 -- * its sizeterm
@@ -182,7 +184,7 @@ checkADT ::
   Text -> -- name
   Vector Text -> -- type parameters
   Syntax.Ctors (Var Int Void) -> -- constructors
-  m (Kind, Constraint Void, Size Void)
+  m (Map Text (TypeScheme Void), Kind, Constraint Void, Size Void)
 checkADT kScope datatypeName paramNames ctors = do
   datatypeKind <- KVar <$> freshKMeta
   paramMetas <- Vector.replicateM (Vector.length paramNames) freshKMeta
@@ -232,13 +234,6 @@ checkADT kScope datatypeName paramNames ctors = do
       Vector.map (assumedConstraintsBwd Map.!) $
       Vector.filter (`Set.member` usedSizeMetas) sizeMetas
 
-    axiomHead :: Type (Var Int Void)
-    axiomHead =
-      Vector.foldl
-        (\acc ix -> TApp acc (TVar $ B ix))
-        (TName datatypeName)
-        [0..length paramNames - 1]
-
   let
     m_sz' =
       traverse
@@ -252,11 +247,43 @@ checkADT kScope datatypeName paramNames ctors = do
     Nothing -> error "failed to abstract over all SMetas"
     Just sz' ->
       pure
-        ( IR.substKMeta (const KType) datatypeKind''
-        , makeSizeConstraint paramKinds usedConstraints axiomHead
+        ( ctorSchemes (Vector.zip paramNames paramKinds) mempty ctors
+        , IR.substKMeta (const KType) datatypeKind''
+        , makeSizeConstraint paramKinds usedConstraints fullyApplied
         , sz'
         )
   where
+    fullyApplied :: Type (Var Int Void)
+    fullyApplied =
+      Vector.foldl
+        (\acc ix -> TApp acc (TVar $ B ix))
+        (TName datatypeName)
+        [0..length paramNames - 1]
+
+    ctorSchemes ::
+      Vector (Text, Kind) ->
+      Map Text (TypeScheme Void) ->
+      Syntax.Ctors (Var Int Void) ->
+      Map Text (TypeScheme Void)
+    ctorSchemes paramKinds !acc cs =
+      case cs of
+        Syntax.End -> acc
+        Syntax.Ctor ctorName ctorArgs rest ->
+          ctorSchemes
+            paramKinds
+            (Map.insert
+              ctorName
+              (IR.TypeScheme
+               { IR.schemeTyArgs = paramKinds
+               , IR.schemeConstraints = []
+               , IR.schemeArgs = (,) Nothing <$> ctorArgs
+               , IR.schemeRetTy = fullyApplied
+               }
+              )
+              acc
+            )
+            rest
+
     adtKinds ::
       Map Text Kind ->
       Vector KMeta ->
