@@ -6,7 +6,7 @@ module Codegen
   ( Code
   , emptyCode
   , codeKinds
-  , codeFunctions
+  , codeDeclarations
   , codeGlobalTheory
   , genFunction
   , genExpr
@@ -29,8 +29,12 @@ import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
+import Data.Word (Word64)
 
-import Check.Entailment (Theory(..), emptyEntailState, findSMeta, freshSMeta, solve)
+import Check.Entailment
+  ( Theory(..)
+  , emptyEntailState, findSMeta, freshSMeta, solve
+  )
 import Codegen.C (CDecl, CExpr, CStatement, CType)
 import qualified Codegen.C as C
 import qualified IR
@@ -42,7 +46,7 @@ import qualified Syntax
 data Code
   = Code
   { _codeKinds :: Map Text IR.Kind
-  , _codeFunctions :: Map Text IR.Function
+  , _codeDeclarations :: Map Text IR.Declaration
   , _codeGlobalTheory :: Map (IR.Constraint Void) (Size Void)
   , _codeCompiledNames ::
       Map
@@ -56,7 +60,7 @@ emptyCode :: Code
 emptyCode =
   Code
   { _codeKinds = mempty
-  , _codeFunctions = mempty
+  , _codeDeclarations = mempty
   , _codeGlobalTheory = mempty
   , _codeCompiledNames = mempty
   , _codeSupply = 0
@@ -74,7 +78,7 @@ genType ty =
     Syntax.TVar a -> absurd a
     Syntax.TApp (Syntax.TFun args) ret -> C.FunPtr (genType ret) (genType <$> args)
     Syntax.TApp Syntax.TPtr ret -> C.Ptr (genType ret)
-    Syntax.TApp _ _ -> C.Void $ C.Ann (Syntax.prettyType absurd ty)
+    Syntax.TApp _ _ -> C.Void . Just $ C.Ann (Syntax.prettyType absurd ty)
     Syntax.TUInt ws ->
       case ws of
         Syntax.S8 -> C.Uint8
@@ -90,7 +94,7 @@ genType ty =
     Syntax.TBool -> C.Bool
     Syntax.TPtr -> error "genType: unapplied TPtr"
     Syntax.TFun{} -> error "genType: unapplied TFun"
-    Syntax.TName n -> C.Void $ C.Ann n
+    Syntax.TName n -> C.Void . Just $ C.Ann n
 
 genInst ::
   (MonadState Code m) =>
@@ -103,13 +107,62 @@ genInst name ts = do
     Nothing -> do
       codeCompiledNames %= Map.insert (name, ts) Nothing
       code <- do
-        m_func <- uses codeFunctions $ Map.lookup name
-        case m_func of
+        m_decl <- uses codeDeclarations $ Map.lookup name
+        case m_decl of
           Nothing -> error $ "genInst: " <> show name <> " not found"
-          Just func -> genFunction func ts
+          Just decl ->
+            case decl of
+              IR.DFunc func -> genFunction func ts
+              IR.DCtor{} -> error $ "genInst: got Ctor"
       codeCompiledNames %= Map.insert (name, ts) (Just code)
     Just{} -> pure ()
   pure $ C.Var name
+
+genCtor ::
+  (MonadState Code m) =>
+  Text ->
+  Vector (Syntax.Type Void) ->
+  m CExpr
+genCtor name ts = do
+  m_code <- uses codeCompiledNames (Map.lookup (name, ts))
+  case m_code of
+    Nothing -> do
+      codeCompiledNames %= Map.insert (name, ts) Nothing
+      code <- do
+        m_decl <- uses codeDeclarations $ Map.lookup name
+        case m_decl of
+          Nothing -> error $ "genCtor: " <> show name <> " not found"
+          Just decl ->
+            case decl of
+              IR.DFunc{} -> error $ "genCtor: got Func"
+              IR.DCtor ctor -> genConstructor ctor ts
+      codeCompiledNames %= Map.insert (name, ts) (Just code)
+    Just{} -> pure ()
+  pure $ C.Var name
+
+sizeOfType ::
+  Map Text IR.Kind ->
+  Map (IR.Constraint Void) (Size Void) ->
+  Syntax.Type Void ->
+  Word64
+sizeOfType kindScope global t =
+  case result of
+    Left err -> error $ "sizeOfType: got " <> show err
+    Right n -> n
+  where
+    result =
+      flip evalStateT (emptyEntailState emptyTCState) $ do
+        m <- freshSMeta
+        (_, solutions) <-
+          solve
+            kindScope
+            absurd
+            absurd
+            (Theory { _thGlobal = global, _thLocal = mempty })
+            [(m, IR.CSized $ Right <$> t)]
+        case findSMeta solutions m of
+          Size.Word n -> pure n
+          sz -> error $ "sizeOfType: got " <> show sz
 
 genExpr ::
   forall m tm.
@@ -125,7 +178,9 @@ genExpr vars expr =
       genBindings es
       genExpr vars b
       where
-        genBindings :: Vector ((Text, IR.Expr Void tm), Syntax.Type Void) -> WriterT [CStatement] m ()
+        genBindings ::
+          Vector ((Text, IR.Expr Void tm), Syntax.Type Void) ->
+          WriterT [CStatement] m ()
         genBindings =
           traverse_
             (\((bname, bval), bty) -> do
@@ -133,7 +188,24 @@ genExpr vars expr =
                tell [C.Declare (genType bty) bname bval']
             )
     IR.Inst n ts -> genInst n ts
-    IR.Call a bs -> do
+    IR.Ctor{} -> error "genExpr: un-Call-ed Ctor"
+    IR.Call (IR.Ctor n ts) bs retTy -> do
+      n' <- genCtor n ts
+      kindScope <- use codeKinds
+      global <- use codeGlobalTheory
+      let retTySize = sizeOfType kindScope global retTy
+      dest <- do
+        d <- freshName
+        tell
+          [ C.Declare
+              (C.Ptr $ genType retTy)
+              d
+              (C.Alloca . C.Number $ fromIntegral retTySize)
+          ]
+        pure $ C.Var d
+      bs' <- traverse (genExpr vars) bs
+      pure $ C.Call n' (Vector.cons dest bs')
+    IR.Call a bs _ -> do
       a' <- genExpr vars a
       bs' <- traverse (genExpr vars) bs
       pure $ C.Call a' bs'
@@ -152,31 +224,15 @@ genExpr vars expr =
       kindScope <- use codeKinds
       global <- use codeGlobalTheory
       let
-        m_size =
-          flip evalStateT (emptyEntailState emptyTCState) $ do
-            m <- freshSMeta
-            (_, solutions) <-
-              solve
-                kindScope
-                absurd
-                absurd
-                (Theory { _thGlobal = global, _thLocal = mempty })
-                [(m, IR.CSized $ Right <$> t)]
-            pure $ findSMeta solutions m
-      case m_size of
-        Left err -> error $ "genExpr: solve failed with " <> show err
-        Right size ->
-          case size of
-            Size.Word n -> do
-              let pt = C.Ptr $ genType t
-              n1 <- freshName
-              tell
-                [ C.Declare pt n1 . C.Cast pt $
-                  C.Malloc (C.Number $ fromIntegral n)
-                , C.Assign (C.Deref $ C.Var n1) a'
-                ]
-              pure $ C.Var n1
-            _ -> error $ "genExpr: " <> show size <> " is not a Word"
+        size = sizeOfType kindScope global t
+        pt = C.Ptr $ genType t
+      n1 <- freshName
+      tell
+        [ C.Declare pt n1 . C.Cast pt $
+          C.Malloc (C.Number $ fromIntegral size)
+        , C.Assign (C.Deref $ C.Var n1) a'
+        ]
+      pure $ C.Var n1
     IR.Deref a -> C.Deref <$> genExpr vars a
 
 typeSuffix :: Vector (Syntax.Type Void) -> Text
@@ -196,6 +252,62 @@ typeSuffix ts =
         Syntax.TPtr -> "TPtr"
         Syntax.TFun args -> "TFun" <> foldMap doTy args
         Syntax.TName a -> a
+
+genConstructor ::
+  (MonadState Code m) =>
+  IR.Constructor ->
+  Vector (Syntax.Type Void) ->
+  m CDecl
+genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
+  let
+    tyArgsLen = length tyArgs
+  in
+    case compare (Vector.length tyArgs') tyArgsLen of
+      LT ->
+        error $
+        "genConstructor: not enough type arguments for " <>
+        show name <>
+        " (expected " <> show tyArgsLen <> ")"
+      GT ->
+        error $
+        "genConstructor: too many type arguments for " <>
+        show name <>
+        " (expected " <> show tyArgsLen <> ")"
+      EQ -> do
+        kindScope <- use codeKinds
+        global <- use codeGlobalTheory
+        let
+          inst = unvar (tyArgs' Vector.!) absurd
+          args_inst = (fmap.fmap) (>>= inst) args
+          retTy_inst = retTy >>= inst
+
+          argSizes =
+            fmap
+              (\(_, argTy) -> sizeOfType kindScope global argTy)
+              args_inst
+        let argOffsets = Vector.init $ Vector.scanl (+) 0 argSizes
+        destName <- freshName
+        args_inst' <-
+          traverse
+            (\(m_n, t) -> (,) (genType t) <$> maybe freshName pure m_n)
+            args_inst
+        pure $
+          C.Function
+            (C.Void Nothing)
+            (name <> typeSuffix tyArgs')
+            (Vector.cons (C.Ptr $ genType retTy_inst, destName) $
+             args_inst'
+            )
+            (foldr
+               (\(offset, (_, n)) rest ->
+                 C.Assign
+                   (C.Index (C.Var destName) offset)
+                   (C.Var n) :
+                 rest
+               )
+               []
+               (Vector.zip argOffsets args_inst')
+            )
 
 genFunction ::
   (MonadState Code m) =>

@@ -21,7 +21,7 @@ import Check.Datatype (checkADT)
 import Check.Entailment (HasSizeMetas, HasGlobalTheory, emptyEntailState, globalTheory)
 import Check.Function (checkFunction)
 import Check.TypeError (TypeError)
-import Codegen (codeKinds, codeFunctions, codeGlobalTheory)
+import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
 import qualified Codegen
 import qualified Codegen.C as C
 import qualified IR
@@ -34,28 +34,28 @@ compile ::
   [Syntax.Declaration] ->
   m [C.CDecl]
 compile decls = do
-  ((kindScope, _, funcs), entailState) <-
+  ((kindScope, _, decls'), entailState) <-
     flip runStateT (emptyEntailState emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
     checkDecls mempty mempty decls
   let
-    funcsMap =
+    declsMap =
       foldl'
-        (\acc f -> Map.insert (IR.funcName f) f acc)
+        (\acc f -> Map.insert (IR.declName f) f acc)
         mempty
-        funcs
+        decls'
     initialCode =
       Codegen.emptyCode &
         codeKinds .~ kindScope &
-        codeFunctions .~ funcsMap &
+        codeDeclarations .~ declsMap &
         codeGlobalTheory .~ view globalTheory entailState
     code =
       flip evalState initialCode $ do
-        case Map.lookup "main" funcsMap of
-          Nothing -> error "no main function"
-          Just mainFunc -> do
+        case Map.lookup "main" declsMap of
+          Just (IR.DFunc mainFunc) -> do
             mainFunc' <- Codegen.genFunction mainFunc mempty
             ds <- Codegen.genDecls
             pure $ C.preamble <> ds <> [mainFunc']
+          _ -> error "no main function"
   pure code
   where
     checkDecls ::
@@ -73,7 +73,7 @@ compile decls = do
       m
         ( Map Text IR.Kind
         , Map Text (IR.TypeScheme Void)
-        , [Either IR.Ctor IR.Function]
+        , [IR.Declaration]
         )
     checkDecls kindScope tyScope ds =
       case ds of
@@ -81,17 +81,36 @@ compile decls = do
         d:rest ->
           case d of
             Syntax.DData (Syntax.ADT name params ctors) -> do
-              (ctorsFuncs, kind, axiom, size) <- checkADT kindScope name params ctors
+              (ctorsDecls, kind, axiom, size) <- checkADT kindScope name params ctors
               globalTheory %= Map.insert axiom size
-              checkDecls
-                (Map.insert name kind kindScope)
-                (ctorsFuncs <> tyScope)
-                rest
+              (kindScope', tyScope', rest') <-
+                checkDecls
+                  (Map.insert name kind kindScope)
+                  (foldl'
+                    (\acc ctor ->
+                      Map.insert
+                        (IR.ctorName ctor)
+                        (IR.constructorToTypeScheme ctor)
+                        acc
+                    )
+                    tyScope
+                    ctorsDecls
+                  )
+                  rest
+              pure
+                ( kindScope'
+                , tyScope'
+                , foldr ((:) . IR.DCtor) rest' ctorsDecls
+                )
             Syntax.DFunc func -> do
               func' <- checkFunction kindScope tyScope func
               (kindScope', tyScope', rest') <-
                 checkDecls
                   kindScope
-                  (Map.insert (IR.funcName func') (IR.toTypeScheme func') tyScope)
+                  (Map.insert
+                    (IR.funcName func')
+                    (IR.functionToTypeScheme func')
+                    tyScope
+                  )
                   rest
-              pure (kindScope', tyScope', func' : rest')
+              pure (kindScope', tyScope', IR.DFunc func' : rest')

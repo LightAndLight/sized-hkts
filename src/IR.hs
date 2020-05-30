@@ -23,7 +23,8 @@ data Expr ty tm
 
   | Let (Vector ((Text, Expr ty tm), Type ty)) (Expr ty tm)
   | Inst Text (Vector (Type ty))
-  | Call (Expr ty tm) (Vector (Expr ty tm))
+  | Ctor Text (Vector (Type ty))
+  | Call (Expr ty tm) (Vector (Expr ty tm)) (Type ty)
 
   | UInt8 Word8
   | UInt16 Word16
@@ -58,7 +59,9 @@ bindType_Expr f e =
         (fmap (bimap (fmap (bindType_Expr f)) (>>= f)) es)
         (bindType_Expr f b)
     Inst n ts -> Inst n ((>>= f) <$> ts)
-    Call a bs -> Call (bindType_Expr f a) (bindType_Expr f <$> bs)
+    Ctor n ts -> Ctor n ((>>= f) <$> ts)
+    Call a bs t ->
+      Call (bindType_Expr f a) (bindType_Expr f <$> bs) (t >>= f)
     UInt8 ws -> UInt8 ws
     UInt16 ws -> UInt16 ws
     UInt32 ws -> UInt32 ws
@@ -124,18 +127,21 @@ data Function
         (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
-data Ctor
-  = Ctor
+data Constructor
+  = Constructor
   { ctorName :: Text
   , ctorTyArgs :: Vector (Text, Kind)
-  , ctorConstraints :: Vector (Constraint (Var Int Void)) -- indices from ctorTyArgs
-  , ctorArgs :: Vector (Text, Type (Var Int Void)) -- indices from ctorTyArgs
+  , ctorArgs :: Vector (Maybe Text, Type (Var Int Void)) -- indices from ctorTyArgs
   , ctorRetTy :: Type (Var Int Void) -- indices from ctorTyArgs
   } deriving (Eq, Show)
 
+data Origin = OFunction | OConstructor
+  deriving (Eq, Show)
+
 data TypeScheme ty
   = TypeScheme
-  { schemeTyArgs :: Vector (Text, Kind)
+  { schemeOrigin :: Origin
+  , schemeTyArgs :: Vector (Text, Kind)
   , schemeConstraints :: Vector (Constraint (Var Int ty)) -- indices from schemeTyArgs
   , schemeArgs :: Vector (Maybe Text, Type (Var Int ty)) -- indices from schemeTyArgs
   , schemeRetTy :: Type (Var Int ty) -- indices from schemeTyArgs
@@ -145,6 +151,20 @@ deriveShow1 ''TypeScheme
 instance Eq ty => Eq (TypeScheme ty) where; (==) = eq1
 instance Show ty => Show (TypeScheme ty) where; showsPrec = showsPrec1
 
-toTypeScheme :: Function -> TypeScheme Void
-toTypeScheme (Function _ tyArgs constrs args ret _) =
-  TypeScheme tyArgs constrs (over (mapped._1) Just args) ret
+functionToTypeScheme :: Function -> TypeScheme Void
+functionToTypeScheme (Function _ tyArgs constrs args ret _) =
+  TypeScheme OFunction tyArgs constrs (over (mapped._1) Just args) ret
+
+constructorToTypeScheme :: Constructor -> TypeScheme Void
+constructorToTypeScheme (Constructor _ tyArgs args ret) =
+  TypeScheme OConstructor tyArgs mempty args ret
+
+data Declaration
+  = DFunc Function
+  | DCtor Constructor
+
+declName :: Declaration -> Text
+declName d =
+  case d of
+    DFunc a -> funcName a
+    DCtor a -> ctorName a

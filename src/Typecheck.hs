@@ -163,12 +163,18 @@ data InferResult ty tm
 instantiateScheme ::
   (MonadState (s ty) m, HasTypeMetas s, Ord ty) =>
   TypeScheme Void ->
-  m (Vector TMeta, Set (IR.Constraint (Either TMeta ty)), TypeM ty)
-instantiateScheme (IR.TypeScheme tyArgs constraints args retTy) = do
+  m
+    ( IR.Origin
+    , Vector TMeta
+    , Set (IR.Constraint (Either TMeta ty))
+    , TypeM ty
+    )
+instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
   tyArgMetas <- traverse (\(_, k) -> freshTMeta k) tyArgs
   let placeMetas = unvar (Left . (tyArgMetas Vector.!)) absurd
   pure
-    ( tyArgMetas
+    ( origin
+    , tyArgMetas
     , foldl'
         (\acc c -> Set.insert (placeMetas <$> c) acc)
         mempty
@@ -210,13 +216,21 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
           case Map.lookup name tyScope of
             Nothing -> throwError $ NotInScope name
             Just scheme -> do
-              (metas, constraints, bodyTy) <- instantiateScheme scheme
+              (origin, metas, constraints, bodyTy) <- instantiateScheme scheme
               requiredConstraints <>= constraints
-              pure $
-                InferResult
-                { irExpr = IR.Inst name $ Syntax.TVar . Left <$> metas
-                , irType = bodyTy
-                }
+              case origin of
+                IR.OFunction ->
+                  pure $
+                    InferResult
+                    { irExpr = IR.Inst name $ Syntax.TVar . Left <$> metas
+                    , irType = bodyTy
+                    }
+                IR.OConstructor ->
+                  pure $
+                    InferResult
+                    { irExpr = IR.Ctor name $ Syntax.TVar . Left <$> metas
+                    , irType = bodyTy
+                    }
         Just ty ->
           pure $
             InferResult
@@ -257,17 +271,17 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           args
-      meta <- freshTMeta KType
+      retTy <- Syntax.TVar . Left <$> freshTMeta KType
       unifyType
         kindScope
         (Right . tyNames)
         kinds
-        (TypeM $ Syntax.TApp (Syntax.TFun argTys) (Syntax.TVar $ Left meta))
+        (TypeM $ Syntax.TApp (Syntax.TFun argTys) retTy)
         (irType funResult)
       pure $
         InferResult
-        { irExpr = IR.Call (irExpr funResult) args'
-        , irType = TypeM . Syntax.TVar $ Left meta
+        { irExpr = IR.Call (irExpr funResult) args' retTy
+        , irType = TypeM retTy
         }
 
     Syntax.Number{} -> throwError $ Can'tInfer (tmNames <$> expr)
@@ -458,7 +472,11 @@ checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
         traverse
           (\(e, t) -> checkExpr kindScope tyScope letScope tyNames tmNames kinds types e (TypeM t))
           (Vector.zip args expectedArgs)
-      pure $ CheckResult { crExpr = IR.Call (irExpr name') (crExpr <$> args') }
+      pure $
+        CheckResult
+        { crExpr =
+          IR.Call (irExpr name') (crExpr <$> args') (unTypeM ty)
+        }
     Syntax.Let bindings rest -> do
       bindingTypes <-
         foldlM
@@ -532,7 +550,16 @@ zonkExprTypes e =
       (traverse.traverse)
         (either (error . ("zonking found: " <>) . show) pure)
       args
-    IR.Call f args -> IR.Call <$> zonkExprTypes f <*> traverse zonkExprTypes args
+    IR.Ctor n ts ->
+      IR.Ctor n <$>
+      (traverse.traverse)
+        (either (error . ("zonking found: " <>) . show) pure)
+      ts
+    IR.Call f args t ->
+      IR.Call <$>
+      zonkExprTypes f <*>
+      traverse zonkExprTypes args <*>
+      traverse (either (error . ("zonking found: " <>) . show) pure) t
     IR.UInt8 n -> pure $ IR.UInt8 n
     IR.UInt16 n -> pure $ IR.UInt16 n
     IR.UInt32 n -> pure $ IR.UInt32 n

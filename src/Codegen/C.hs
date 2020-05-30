@@ -20,6 +20,7 @@ import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Vector (Vector)
+import Data.Word (Word64)
 
 newtype Ann = Ann Text
   deriving (Eq, Show)
@@ -27,7 +28,7 @@ newtype Ann = Ann Text
 data CType
   = Ptr CType
   | FunPtr CType (Vector CType)
-  | Void Ann
+  | Void (Maybe Ann)
   | Uint8
   | Uint16
   | Uint32
@@ -48,6 +49,7 @@ data CExpr
   | Var Text
   | Call CExpr (Vector CExpr)
   | Deref CExpr
+  | Index CExpr Word64
   | Cast CType CExpr
   deriving (Eq, Show)
 
@@ -71,6 +73,9 @@ intersperseMap sep f = fold . List.intersperse sep . foldr ((:) . f) []
 parens :: Text -> Text
 parens a = "(" <> a <> ")"
 
+brackets :: Text -> Text
+brackets a = "[" <> a <> "]"
+
 prettyCExpr :: CExpr -> Text
 prettyCExpr e =
   case e of
@@ -93,6 +98,12 @@ prettyCExpr e =
          Cast{} -> parens
          _ -> id)
       (prettyCExpr a)
+    Index a n ->
+      (case a of
+         Cast{} -> parens
+         _ -> id)
+      (prettyCExpr a) <>
+      brackets (Text.pack $ show n)
     Cast t a ->
       parens (prettyCType t) <>
       (case a of
@@ -105,7 +116,7 @@ prettyCType t =
   case t of
     Ptr a -> prettyCType a <> "*"
     FunPtr ret args -> "(" <> prettyCType ret <> ")*(" <> intersperseMap ", " prettyCType args <> ")"
-    Void (Ann a) -> "void /* " <> a <> " */"
+    Void m_ann  -> "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
     Uint8 -> "uint8_t"
     Uint16 -> "uint16_t"
     Uint32 -> "uint32_t"

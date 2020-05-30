@@ -292,10 +292,16 @@ solveTMetas_Expr = go
           traverse
             (solveTMetas_Type id)
             args
-        IR.Call f args ->
+        IR.Ctor n ts ->
+          IR.Ctor n <$>
+          traverse
+            (solveTMetas_Type id)
+            ts
+        IR.Call f args t ->
           IR.Call <$>
           go f <*>
-          traverse go args
+          traverse go args <*>
+          solveTMetas_Type id t
         IR.UInt8 n -> pure $ IR.UInt8 n
         IR.UInt16 n -> pure $ IR.UInt16 n
         IR.UInt32 n -> pure $ IR.UInt32 n

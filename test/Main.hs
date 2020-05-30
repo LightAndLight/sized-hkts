@@ -12,7 +12,6 @@ import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Text.IO as Text
 import Data.Void (Void, absurd)
 import Test.Hspec
 
@@ -254,11 +253,23 @@ main =
               mempty
               "Pair"
               ["A", "B"]
-              (Syntax.Ctor "Pair" [Syntax.TVar $ B 0, Syntax.TVar $ B 1] Syntax.End)
+              (Syntax.Ctor
+                "Pair"
+                [Syntax.TVar $ B 0, Syntax.TVar $ B 1]
+                Syntax.End
+              )
 
         result `shouldBe`
           Right
-            ( KArr KType $ KArr KType KType
+            ( [ IR.Constructor
+                { IR.ctorName = "Pair"
+                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
+                , IR.ctorArgs = [(Nothing, TVar $ B 0), (Nothing, TVar $ B 1)]
+                , IR.ctorRetTy =
+                    foldl @[] TApp (TName "Pair") [TVar $ B 0, TVar $ B 1]
+                }
+              ]
+            , KArr KType $ KArr KType KType
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CSized $ foldl @[] TApp (TName "Pair") [TVar . F $ B (), TVar $ B ()]
@@ -287,7 +298,27 @@ main =
 
         case result of
           Left err -> expectationFailure $ "Expected success, got failure: " <> show err
-          Right (kind, constraint, size) -> do
+          Right (ctors, kind, constraint, size) -> do
+            ctors `shouldBe`
+              [ IR.Constructor
+                { IR.ctorName = "Pair"
+                , IR.ctorTyArgs =
+                    [ ("F", KArr KType KType)
+                    , ("A", KType)
+                    , ("B", KType)
+                    ]
+                , IR.ctorArgs =
+                    [ (Nothing, TApp (TVar $ B 0) (TVar $ B 1))
+                    , (Nothing, TApp (TVar $ B 0) (TVar $ B 2))
+                    ]
+                , IR.ctorRetTy =
+                    foldl
+                      @[]
+                      TApp
+                      (TName "Pair")
+                      [TVar $ B 0, TVar $ B 1, TVar $ B 2]
+                }
+              ]
             kind `shouldBe` KArr (KArr KType KType) (KArr KType $ KArr KType KType)
             constraint `shouldBe`
               CForall Nothing (KArr KType KType) (CImplies fConstraint $ -- f
@@ -315,7 +346,34 @@ main =
 
         result `shouldBe`
           Right
-            ( KArr KType $ KArr KType KType
+            ( [ IR.Constructor
+                { IR.ctorName = "Left"
+                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
+                , IR.ctorArgs =
+                    [ (Nothing, TVar $ B 0)
+                    ]
+                , IR.ctorRetTy =
+                    foldl
+                      @[]
+                      TApp
+                      (TName "Sum")
+                      [TVar $ B 0, TVar $ B 1]
+                }
+              , IR.Constructor
+                { IR.ctorName = "Right"
+                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
+                , IR.ctorArgs =
+                    [ (Nothing, TVar $ B 1)
+                    ]
+                , IR.ctorRetTy =
+                    foldl
+                      @[]
+                      TApp
+                      (TName "Sum")
+                      [TVar $ B 0, TVar $ B 1]
+                }
+              ]
+            , KArr KType $ KArr KType KType
             -- forall t0. Sized t0 => forall t1. Sized t1 => Sized (Sum t0 t1)
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
@@ -338,7 +396,17 @@ main =
 
         result `shouldBe`
           Right
-            ( KArr KType KType
+            ( [ IR.Constructor
+                { IR.ctorName = "Box"
+                , IR.ctorTyArgs = [("A", KType)]
+                , IR.ctorArgs =
+                    [ (Nothing, TApp TPtr (TVar $ B 0))
+                    ]
+                , IR.ctorRetTy =
+                    TApp (TName "Box") (TVar $ B 0)
+                }
+              ]
+            , KArr KType KType
             -- forall t0. Sized (Box t0)
             , CForall Nothing KType .
               CSized $ foldl @[] TApp (TName "Box") [TVar $ B ()]
@@ -433,5 +501,4 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code -> do
-            Text.putStrLn $ C.prettyCDecls code
             code `shouldBe` output
