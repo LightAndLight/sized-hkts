@@ -51,7 +51,7 @@ data Code
   , _codeCompiledNames ::
       Map
         (Text, Vector (Syntax.Type Void))
-        (Maybe CDecl) -- Nothing indicates that this code is currently being compiled
+        (Text, Maybe CDecl) -- Nothing indicates that this code is currently being compiled
   , _codeSupply :: Int
   }
 makeLenses ''Code
@@ -78,7 +78,9 @@ genType ty =
     Syntax.TVar a -> absurd a
     Syntax.TApp (Syntax.TFun args) ret -> C.FunPtr (genType ret) (genType <$> args)
     Syntax.TApp Syntax.TPtr ret -> C.Ptr (genType ret)
-    Syntax.TApp _ _ -> C.Void . Just $ C.Ann (Syntax.prettyType absurd ty)
+    Syntax.TApp _ _ ->
+      C.Ptr . C.Void .
+      Just $ C.Ann (Syntax.prettyType absurd ty)
     Syntax.TUInt ws ->
       case ws of
         Syntax.S8 -> C.Uint8
@@ -94,7 +96,9 @@ genType ty =
     Syntax.TBool -> C.Bool
     Syntax.TPtr -> error "genType: unapplied TPtr"
     Syntax.TFun{} -> error "genType: unapplied TFun"
-    Syntax.TName n -> C.Void . Just $ C.Ann n
+    Syntax.TName n ->
+      C.Ptr . C.Void .
+      Just $ C.Ann n
 
 genInst ::
   (MonadState Code m) =>
@@ -103,20 +107,23 @@ genInst ::
   m CExpr
 genInst name ts = do
   m_code <- uses codeCompiledNames (Map.lookup (name, ts))
-  case m_code of
-    Nothing -> do
-      codeCompiledNames %= Map.insert (name, ts) Nothing
-      code <- do
-        m_decl <- uses codeDeclarations $ Map.lookup name
-        case m_decl of
-          Nothing -> error $ "genInst: " <> show name <> " not found"
-          Just decl ->
-            case decl of
-              IR.DFunc func -> genFunction func ts
-              IR.DCtor{} -> error $ "genInst: got Ctor"
-      codeCompiledNames %= Map.insert (name, ts) (Just code)
-    Just{} -> pure ()
-  pure $ C.Var name
+  name' <-
+    case m_code of
+      Nothing -> do
+        let realName = name <> typeSuffix ts
+        codeCompiledNames %= Map.insert (name, ts) (realName, Nothing)
+        code <- do
+          m_decl <- uses codeDeclarations $ Map.lookup name
+          case m_decl of
+            Nothing -> error $ "genInst: " <> show name <> " not found"
+            Just decl ->
+              case decl of
+                IR.DFunc func -> genFunction func ts
+                IR.DCtor{} -> error $ "genInst: got Ctor"
+        codeCompiledNames %= Map.insert (name, ts) (realName, Just code)
+        pure realName
+      Just (realName, _) -> pure realName
+  pure $ C.Var name'
 
 genCtor ::
   (MonadState Code m) =>
@@ -125,20 +132,23 @@ genCtor ::
   m CExpr
 genCtor name ts = do
   m_code <- uses codeCompiledNames (Map.lookup (name, ts))
-  case m_code of
-    Nothing -> do
-      codeCompiledNames %= Map.insert (name, ts) Nothing
-      code <- do
-        m_decl <- uses codeDeclarations $ Map.lookup name
-        case m_decl of
-          Nothing -> error $ "genCtor: " <> show name <> " not found"
-          Just decl ->
-            case decl of
-              IR.DFunc{} -> error $ "genCtor: got Func"
-              IR.DCtor ctor -> genConstructor ctor ts
-      codeCompiledNames %= Map.insert (name, ts) (Just code)
-    Just{} -> pure ()
-  pure $ C.Var name
+  name' <-
+    case m_code of
+      Nothing -> do
+        let realName = name <> typeSuffix ts
+        codeCompiledNames %= Map.insert (name, ts) (realName, Nothing)
+        code <- do
+          m_decl <- uses codeDeclarations $ Map.lookup name
+          case m_decl of
+            Nothing -> error $ "genCtor: " <> show name <> " not found"
+            Just decl ->
+              case decl of
+                IR.DFunc{} -> error $ "genCtor: got Func"
+                IR.DCtor ctor -> genConstructor ctor ts
+        codeCompiledNames %= Map.insert (name, ts) (realName, Just code)
+        pure realName
+      Just (realName, _) -> pure realName
+  pure $ C.Var name'
 
 sizeOfType ::
   Map Text IR.Kind ->
@@ -200,9 +210,9 @@ genExpr vars expr =
         d <- freshName
         tell
           [ C.Declare
-              (C.Ptr retTyGen)
+              retTyGen
               d
-              (C.Cast (C.Ptr retTyGen) .
+              (C.Cast retTyGen .
                C.Alloca . C.Number $
                fromIntegral retTySize
               )
@@ -299,15 +309,18 @@ genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
             args_inst
         pure $
           C.Function
-            (C.Ptr retTy_instGen)
+            retTy_instGen
             (name <> typeSuffix tyArgs')
-            (Vector.cons (C.Ptr retTy_instGen, destName) $
+            (Vector.cons (retTy_instGen, destName) $
              args_inst'
             )
             (foldr
-               (\(offset, (_, n)) rest ->
+               (\(offset, (t, n)) rest ->
                  C.Assign
-                   (C.Index (C.Var destName) offset)
+                   (C.Deref $
+                    C.Cast (C.Ptr t) $
+                    C.Plus (C.Var destName) (C.Number $ fromIntegral offset)
+                   )
                    (C.Var n) :
                  rest
                )
@@ -354,7 +367,7 @@ genDecls :: MonadState Code m => m [CDecl]
 genDecls = do
   names <- uses codeCompiledNames Map.toList
   foldrM
-    (\(n, m_decl) rest ->
+    (\(n, (_, m_decl)) rest ->
        case m_decl of
          Nothing -> error $ "genDecls: no decl for " <> show n
          Just decl -> pure $ decl : rest

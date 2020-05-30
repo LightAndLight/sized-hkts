@@ -51,6 +51,7 @@ data CExpr
   | Deref CExpr
   | Index CExpr Word64
   | Cast CType CExpr
+  | Plus CExpr CExpr
   deriving (Eq, Show)
 
 data CStatement
@@ -89,18 +90,20 @@ prettyCExpr e =
       (case a of
          Cast{} -> parens
          Deref{} -> parens
+         Plus{} -> parens
          _ -> id
       ) (prettyCExpr a) <>
       parens (intersperseMap ", " prettyCExpr bs)
     Deref a ->
       "*" <>
       (case a of
-         Cast{} -> parens
+         Plus{} -> parens
          _ -> id)
       (prettyCExpr a)
     Index a n ->
       (case a of
          Cast{} -> parens
+         Plus{} -> parens
          _ -> id)
       (prettyCExpr a) <>
       brackets (Text.pack $ show n)
@@ -108,15 +111,21 @@ prettyCExpr e =
       parens (prettyCType t) <>
       (case a of
          Cast{} -> parens
+         Plus{} -> parens
          _ -> id
       ) (prettyCExpr a)
+    Plus a b ->
+      prettyCExpr a <>
+      " + " <>
+      prettyCExpr b
 
 prettyCType :: CType -> Text
 prettyCType t =
   case t of
-    Ptr a -> prettyCType a <> "*"
+    Ptr a -> prettyCType a <> " *"
     FunPtr ret args -> "(" <> prettyCType ret <> ")*(" <> intersperseMap ", " prettyCType args <> ")"
-    Void m_ann  -> "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
+    Void m_ann  ->
+      "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
     Uint8 -> "uint8_t"
     Uint16 -> "uint16_t"
     Uint32 -> "uint32_t"
@@ -152,5 +161,6 @@ preamble :: [CDecl]
 preamble =
   [ Include "\"stdlib.h\""
   , Include "\"stdint.h\""
+  , Include "\"stdbool.h\""
   , Include "\"alloca.h\""
   ]

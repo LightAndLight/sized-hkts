@@ -296,7 +296,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
     Syntax.BFalse ->
       pure $
       InferResult
-      { irExpr = IR.BTrue
+      { irExpr = IR.BFalse
       , irType = TypeM Syntax.TBool
       }
 

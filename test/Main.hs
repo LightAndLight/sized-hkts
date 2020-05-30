@@ -12,6 +12,7 @@ import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+-- import qualified Data.Text.IO as Text
 import Data.Void (Void, absurd)
 import Test.Hspec
 
@@ -462,7 +463,7 @@ main =
               [ C.Return $ C.Var "x"
               ]
             , C.Function C.Int32 "main" []
-              [ C.Return $ C.Call (C.Var "id") [C.Number 0]
+              [ C.Return $ C.Call (C.Var "id_TInt32") [C.Number 0]
               ]
             ]
         case Compile.compile input of
@@ -540,18 +541,25 @@ main =
                 , (C.Bool, "__1")
                 , (C.Bool, "__2")
                 ]
-                [ C.Assign (C.Index (C.Var "__0") 0) (C.Var "__1")
-                , C.Assign (C.Index (C.Var "__0") 1) (C.Var "__2")
+                [ C.Assign
+                    (C.Deref . C.Cast (C.Ptr C.Bool) $
+                     C.Plus (C.Var "__0") (C.Number 0)
+                    )
+                    (C.Var "__1")
+                , C.Assign
+                    (C.Deref . C.Cast (C.Ptr C.Bool) $
+                     C.Plus (C.Var "__0") (C.Number 1)
+                    )
+                    (C.Var "__2")
                 , C.Return $ C.Var "__0"
                 ]
             , C.Function C.Int32 "main" []
               [ C.Declare (C.Ptr $ C.Void pairBoolBoolAnn) "__3" $
-                C.Cast (C.Ptr $ C.Void Nothing) (C.Alloca $ C.Number 2)
-              , C.Declare (C.Void Nothing) "__4" $
+                C.Cast (C.Ptr $ C.Void pairBoolBoolAnn) (C.Alloca $ C.Number 2)
+              , C.Declare (C.Ptr $ C.Void pairBoolBoolAnn) "x" $
                 C.Call
                   (C.Var "Pair_TBool_TBool")
                   [C.Var "__3", C.BTrue, C.BFalse]
-              , C.Declare (C.Ptr $ C.Void Nothing) "x" (C.Var "__3")
               , C.Return $ C.Number 99
               ]
             ]
