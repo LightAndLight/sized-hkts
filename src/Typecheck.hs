@@ -335,8 +335,21 @@ checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
   case expr of
     Syntax.Number n -> do
       case unTypeM ty of
-        Syntax.TVar (Left m) ->
-          checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr (_ m)
+        Syntax.TVar (Left m) -> do
+          m_ty' <- getTMeta m
+          case m_ty' of
+            Nothing -> throwError $ Can'tInfer (tmNames <$> expr)
+            Just ty' ->
+              checkExpr
+                kindScope
+                tyScope
+                letScope
+                tyNames
+                tmNames
+                kinds
+                types
+                expr
+                ty'
         Syntax.TUInt sz ->
           case sz of
             Syntax.S8 ->

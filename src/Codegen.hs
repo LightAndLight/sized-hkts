@@ -1,4 +1,5 @@
 {-# language FlexibleContexts #-}
+{-# language OverloadedStrings #-}
 {-# language ScopedTypeVariables #-}
 {-# language TemplateHaskell #-}
 module Codegen
@@ -19,7 +20,8 @@ import Control.Lens.Setter ((.=), (%=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad.State (MonadState, evalStateT)
 import Control.Monad.Writer (WriterT, runWriterT, tell)
-import Data.Foldable (foldrM, traverse_)
+import Data.Foldable (fold, foldrM, traverse_)
+import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)
@@ -177,6 +179,24 @@ genExpr vars expr =
             _ -> error $ "genExpr: " <> show size <> " is not a Word"
     IR.Deref a -> C.Deref <$> genExpr vars a
 
+typeSuffix :: Vector (Syntax.Type Void) -> Text
+typeSuffix ts =
+  if Vector.null ts
+  then mempty
+  else
+    ("_" <>) . fold . List.intersperse "_" $ foldr ((:) . doTy) [] ts
+  where
+    doTy ty =
+      case ty of
+        Syntax.TVar a -> absurd a
+        Syntax.TApp t1 t2 -> "TApp" <> doTy t1 <> doTy t2
+        Syntax.TUInt ws -> "TUInt" <> Text.pack (show $ 8 * Syntax.wordSize ws)
+        Syntax.TInt ws -> "TInt" <> Text.pack (show $ 8 * Syntax.wordSize ws)
+        Syntax.TBool -> "TBool"
+        Syntax.TPtr -> "TPtr"
+        Syntax.TFun args -> "TFun" <> foldMap doTy args
+        Syntax.TName a -> a
+
 genFunction ::
   (MonadState Code m) =>
   IR.Function ->
@@ -208,7 +228,7 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
         pure $
           C.Function
             (genType retTy_inst)
-            name
+            (name <> typeSuffix tyArgs')
             ((\(n, t) -> (genType t, n)) <$> args_inst)
             (sts <> [C.Return body'])
 

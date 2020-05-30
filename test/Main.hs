@@ -383,12 +383,13 @@ main =
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
               , Syntax.funcRetTy = TInt S32
-              , Syntax.funcBody = Syntax.Call (Syntax.Name "id") [Syntax.Number 0]
+              , Syntax.funcBody =
+                  Syntax.Call (Syntax.Name "id") [Syntax.Number 0]
               }
             ]
           output =
             C.preamble <>
-            [ C.Function C.Int32 "id_Int32" [(C.Int32, "x")]
+            [ C.Function C.Int32 "id_TInt32" [(C.Int32, "x")]
               [ C.Return $ C.Var "x"
               ]
             , C.Function C.Int32 "main" []
@@ -396,6 +397,8 @@ main =
               ]
             ]
         case Compile.compile input of
-          Left err -> expectationFailure $ "Expected success, got " <> show err
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
           Right code ->
             code `shouldBe` output

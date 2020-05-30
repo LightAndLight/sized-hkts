@@ -32,6 +32,7 @@ import TCState
   , freshKMeta
   , requiredConstraints
   , solveMetas_Constraint
+  , solveTMetas_Expr
   , solveKMetas
   )
 import Typecheck (CheckResult(..), checkExpr, zonkExprTypes)
@@ -100,6 +101,6 @@ checkFunction kindScope tyScope (Syntax.Function name tyArgs args retTy body) = 
       constraints' <-
         (traverse.traverse) (either (error . ("checkFunction: unsolved meta " <>) . show) pure) =<<
         traverse (solveMetas_Constraint . snd) constraints
-      body' <- zonkExprTypes $ crExpr exprResult
+      body' <- zonkExprTypes =<< solveTMetas_Expr (crExpr exprResult)
       pure (Vector.zip tyArgs tyArgKinds', constraints', body')
   pure $ IR.Function name tyArgs' constraints' args retTy body'
