@@ -12,6 +12,7 @@ import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import qualified Data.Text.IO as Text
 import Data.Void (Void, absurd)
 import Test.Hspec
 
@@ -401,4 +402,36 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code ->
+            code `shouldBe` output
+      it "3" $ do
+        let
+          input =
+            [ Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcBody =
+                  Syntax.Let
+                    [("x", Syntax.New $ Syntax.Number 26)]
+                    (Syntax.Deref $ Syntax.Name "x")
+              }
+            ]
+          output =
+            C.preamble <>
+            [ C.Function C.Int32 "main" []
+              [ C.Declare (C.Ptr C.Int32) "__0" $
+                C.Cast (C.Ptr C.Int32) (C.Malloc $ C.Number 4)
+              , C.Assign (C.Deref $ C.Var "__0") (C.Number 26)
+              , C.Declare (C.Ptr C.Int32) "x" (C.Var "__0")
+              , C.Return . C.Deref $ C.Var "x"
+              ]
+            ]
+        case Compile.compile input of
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
+          Right code -> do
+            Text.putStrLn $ C.prettyCDecls code
             code `shouldBe` output

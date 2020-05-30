@@ -103,7 +103,7 @@ prettyCExpr e =
 prettyCType :: CType -> Text
 prettyCType t =
   case t of
-    Ptr a -> "*" <> prettyCType a
+    Ptr a -> prettyCType a <> "*"
     FunPtr ret args -> "(" <> prettyCType ret <> ")*(" <> intersperseMap ", " prettyCType args <> ")"
     Void (Ann a) -> "void /* " <> a <> " */"
     Uint8 -> "uint8_t"
@@ -130,7 +130,9 @@ prettyCDecl d =
     Function ty n args body ->
       prettyCType ty <> " " <> n <>
       "(" <> intersperseMap ", " (\(argTy, argName) -> prettyCType argTy <> " " <> argName) args <> ")" <>
-      "{\n\n" <> intersperseMap "\n;" prettyCStatement body <> "\n\n}"
+      "{\n\n" <>
+      foldMap (\s -> prettyCStatement s <> ";\n") body <>
+      "\n}"
 
 prettyCDecls :: [CDecl] -> Text
 prettyCDecls = intersperseMap "\n\n" prettyCDecl

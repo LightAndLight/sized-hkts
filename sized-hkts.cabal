@@ -66,4 +66,5 @@ test-suite sized-hkts-test
                      , hspec
                      , lens
                      , mtl
+                     , text
                      , transformers

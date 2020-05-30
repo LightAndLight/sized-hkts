@@ -173,7 +173,7 @@ genExpr vars expr =
               tell
                 [ C.Declare pt n1 . C.Cast pt $
                   C.Malloc (C.Number $ fromIntegral n)
-                , C.Assign (C.Var n1) a'
+                , C.Assign (C.Deref $ C.Var n1) a'
                 ]
               pure $ C.Var n1
             _ -> error $ "genExpr: " <> show size <> " is not a Word"
