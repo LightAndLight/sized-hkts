@@ -193,14 +193,19 @@ genExpr vars expr =
       n' <- genCtor n ts
       kindScope <- use codeKinds
       global <- use codeGlobalTheory
-      let retTySize = sizeOfType kindScope global retTy
+      let
+        retTySize = sizeOfType kindScope global retTy
+        retTyGen = genType retTy
       dest <- do
         d <- freshName
         tell
           [ C.Declare
-              (C.Ptr $ genType retTy)
+              (C.Ptr retTyGen)
               d
-              (C.Alloca . C.Number $ fromIntegral retTySize)
+              (C.Cast (C.Ptr retTyGen) .
+               C.Alloca . C.Number $
+               fromIntegral retTySize
+              )
           ]
         pure $ C.Var d
       bs' <- traverse (genExpr vars) bs
@@ -280,6 +285,7 @@ genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
           inst = unvar (tyArgs' Vector.!) absurd
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst
+          retTy_instGen = genType retTy_inst
 
           argSizes =
             fmap
@@ -293,9 +299,9 @@ genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
             args_inst
         pure $
           C.Function
-            (C.Void Nothing)
+            (C.Ptr retTy_instGen)
             (name <> typeSuffix tyArgs')
-            (Vector.cons (C.Ptr $ genType retTy_inst, destName) $
+            (Vector.cons (C.Ptr retTy_instGen, destName) $
              args_inst'
             )
             (foldr
@@ -305,7 +311,7 @@ genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
                    (C.Var n) :
                  rest
                )
-               []
+               [C.Return $ C.Var destName]
                (Vector.zip argOffsets args_inst')
             )
 

@@ -502,3 +502,62 @@ main =
             "Expected success, got " <> show err
           Right code -> do
             code `shouldBe` output
+      it "4" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "Pair"
+              , Syntax.adtArgs = ["A", "B"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Pair" [TVar $ B 0, TVar $ B 1] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcBody =
+                  Syntax.Let
+                    [ ( "x"
+                      , Syntax.Call
+                          (Syntax.Name "Pair")
+                          [Syntax.BTrue, Syntax.BFalse]
+                      )
+                    ]
+                    (Syntax.Number 99)
+              }
+            ]
+          pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
+          output =
+            C.preamble <>
+            [ C.Function
+                (C.Ptr $ C.Void pairBoolBoolAnn)
+                "Pair_TBool_TBool"
+                [ (C.Ptr $ C.Void pairBoolBoolAnn, "__0")
+                , (C.Bool, "__1")
+                , (C.Bool, "__2")
+                ]
+                [ C.Assign (C.Index (C.Var "__0") 0) (C.Var "__1")
+                , C.Assign (C.Index (C.Var "__0") 1) (C.Var "__2")
+                , C.Return $ C.Var "__0"
+                ]
+            , C.Function C.Int32 "main" []
+              [ C.Declare (C.Ptr $ C.Void pairBoolBoolAnn) "__3" $
+                C.Cast (C.Ptr $ C.Void Nothing) (C.Alloca $ C.Number 2)
+              , C.Declare (C.Void Nothing) "__4" $
+                C.Call
+                  (C.Var "Pair_TBool_TBool")
+                  [C.Var "__3", C.BTrue, C.BFalse]
+              , C.Declare (C.Ptr $ C.Void Nothing) "x" (C.Var "__3")
+              , C.Return $ C.Number 99
+              ]
+            ]
+        case Compile.compile input of
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
+          Right code -> do
+            code `shouldBe` output
