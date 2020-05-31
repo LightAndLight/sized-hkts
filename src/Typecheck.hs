@@ -231,6 +231,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
                     { irExpr = IR.Ctor name $ Syntax.TVar . Left <$> metas
                     , irType = bodyTy
                     }
+                IR.ODatatype -> error "got ODatatype"
         Just ty ->
           pure $
             InferResult

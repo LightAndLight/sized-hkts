@@ -1,6 +1,8 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language FlexibleContexts #-}
+{-# language OverloadedLists #-}
 {-# language TemplateHaskell #-}
+{-# language TypeApplications #-}
 module IR where
 
 import Bound.Var (Var(..), unvar)
@@ -15,7 +17,7 @@ import Data.Void (Void)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Int (Int8, Int16, Int32, Int64)
 
-import Syntax (Type)
+import Syntax (Type(..))
 
 data Expr ty tm
   = Var tm
@@ -131,12 +133,31 @@ data Constructor
   = Constructor
   { ctorName :: Text
   , ctorTyArgs :: Vector (Text, Kind)
-  , ctorArgs :: Vector (Maybe Text, Type (Var Int Void)) -- indices from ctorTyArgs
-  , ctorRetTy :: Type (Var Int Void) -- indices from ctorTyArgs
+  , ctorArgs :: Vector (Maybe Text, Type (Var Int Void))
+  , ctorRetTy :: Type (Var Int Void)
   } deriving (Eq, Show)
 
-data Origin = OFunction | OConstructor
-  deriving (Eq, Show)
+data Datatype
+  = Empty
+  { datatypeName :: Text
+  , datatypeTyArgs :: Vector (Text, Kind)
+  }
+  | Struct
+  { datatypeName :: Text
+  , datatypeTyArgs :: Vector (Text, Kind)
+  , structFields :: Vector (Maybe Text, Type (Var Int Void))
+  }
+  | Enum
+  { datatypeName :: Text
+  , datatypeTyArgs :: Vector (Text, Kind)
+  , enumCtors :: Vector (Text, Vector (Maybe Text, Type (Var Int Void)))
+  } deriving (Eq, Show)
+
+data Origin
+  = ODatatype
+  | OConstructor
+  | OFunction
+  deriving (Eq, Ord, Show)
 
 data TypeScheme ty
   = TypeScheme
@@ -155,16 +176,65 @@ functionToTypeScheme :: Function -> TypeScheme Void
 functionToTypeScheme (Function _ tyArgs constrs args ret _) =
   TypeScheme OFunction tyArgs constrs (over (mapped._1) Just args) ret
 
+datatypeConstructors :: Datatype -> Vector Constructor
+datatypeConstructors adt =
+  case adt of
+    Empty{} -> mempty
+    Struct name params fields ->
+      [ Constructor
+        { ctorName = name
+        , ctorTyArgs = params
+        , ctorArgs = fields
+        , ctorRetTy =
+            foldl @[]
+              (\a b -> TApp a (TVar $ B b))
+              (TName name)
+              [0..length params-1]
+        }
+      ]
+    Enum name params ctors ->
+      let
+        retTy =
+          foldl @[]
+            (\a b -> TApp a (TVar $ B b))
+            (TName name)
+            [0..length params-1]
+      in
+        (\(cn, fields) ->
+          Constructor
+          { ctorName = cn
+          , ctorTyArgs = params
+          , ctorArgs = fields
+          , ctorRetTy = retTy
+          }
+        ) <$>
+        ctors
+
 constructorToTypeScheme :: Constructor -> TypeScheme Void
-constructorToTypeScheme (Constructor _ tyArgs args ret) =
-  TypeScheme OConstructor tyArgs mempty args ret
+constructorToTypeScheme (Constructor _ tyArgs args retTy) =
+  TypeScheme
+  { schemeOrigin = OConstructor
+  , schemeTyArgs = tyArgs
+  , schemeConstraints = []
+  , schemeArgs = args
+  , schemeRetTy = retTy
+  }
 
 data Declaration
-  = DFunc Function
+  = DData Datatype
   | DCtor Constructor
+  | DFunc Function
+
+declOrigin :: Declaration -> Origin
+declOrigin d =
+  case d of
+    DFunc{} -> OFunction
+    DCtor{} -> OConstructor
+    DData{} -> ODatatype
 
 declName :: Declaration -> Text
 declName d =
   case d of
-    DFunc a -> funcName a
-    DCtor a -> ctorName a
+    DFunc f -> funcName f
+    DCtor c -> ctorName c
+    DData a -> datatypeName a

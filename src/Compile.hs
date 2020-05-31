@@ -40,7 +40,7 @@ compile decls = do
   let
     declsMap =
       foldl'
-        (\acc f -> Map.insert (IR.declName f) f acc)
+        (\acc f -> Map.insert (IR.declOrigin f, IR.declName f) f acc)
         mempty
         decls'
     initialCode =
@@ -50,7 +50,7 @@ compile decls = do
         codeGlobalTheory .~ view globalTheory entailState
     code =
       flip evalState initialCode $ do
-        case Map.lookup "main" declsMap of
+        case Map.lookup (IR.OFunction, "main") declsMap of
           Just (IR.DFunc mainFunc) -> do
             mainFunc' <- Codegen.genFunction mainFunc mempty
             ds <- Codegen.genDecls
@@ -81,7 +81,8 @@ compile decls = do
         d:rest ->
           case d of
             Syntax.DData (Syntax.ADT name params ctors) -> do
-              (ctorsDecls, kind, axiom, size) <- checkADT kindScope name params ctors
+              (adt, kind, axiom, size) <- checkADT kindScope name params ctors
+              let ctorsDecls = IR.datatypeConstructors adt
               globalTheory %= Map.insert axiom size
               (kindScope', tyScope', rest') <-
                 checkDecls
@@ -100,7 +101,7 @@ compile decls = do
               pure
                 ( kindScope'
                 , tyScope'
-                , foldr ((:) . IR.DCtor) rest' ctorsDecls
+                , IR.DData adt : foldr ((:) . IR.DCtor) rest' ctorsDecls
                 )
             Syntax.DFunc func -> do
               func' <- checkFunction kindScope tyScope func

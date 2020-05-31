@@ -184,7 +184,7 @@ checkADT ::
   Text -> -- name
   Vector Text -> -- type parameters
   Syntax.Ctors (Var Int Void) -> -- constructors
-  m (Vector IR.Constructor, Kind, Constraint Void, Size Void)
+  m (IR.Datatype, Kind, Constraint Void, Size Void)
 checkADT kScope datatypeName paramNames ctors = do
   datatypeKind <- KVar <$> freshKMeta
   paramMetas <- Vector.replicateM (Vector.length paramNames) freshKMeta
@@ -246,13 +246,23 @@ checkADT kScope datatypeName paramNames ctors = do
   case m_sz' of
     Nothing -> error "failed to abstract over all SMetas"
     Just sz' ->
-      pure
-        ( Vector.fromList $
-          makeConstructors (Vector.zip paramNames paramKinds) ctors
-        , IR.substKMeta (const KType) datatypeKind''
-        , makeSizeConstraint paramKinds usedConstraints fullyApplied
-        , sz'
-        )
+      let
+        namedParamKinds = Vector.zip paramNames paramKinds
+        datatype =
+          case Syntax.ctorsToList ctors of
+            [] ->
+              IR.Empty datatypeName namedParamKinds
+            [(_, ctys)] ->
+              IR.Struct datatypeName namedParamKinds ((,) Nothing <$> ctys)
+            cs ->
+              IR.Enum datatypeName namedParamKinds ((fmap.fmap) ((,) Nothing) <$> Vector.fromList cs)
+      in
+        pure
+          ( datatype
+          , IR.substKMeta (const KType) datatypeKind''
+          , makeSizeConstraint paramKinds usedConstraints fullyApplied
+          , sz'
+          )
   where
     fullyApplied :: Type (Var Int Void)
     fullyApplied =
@@ -260,22 +270,6 @@ checkADT kScope datatypeName paramNames ctors = do
         (\acc ix -> TApp acc (TVar $ B ix))
         (TName datatypeName)
         [0..length paramNames - 1]
-
-    makeConstructors ::
-      Vector (Text, Kind) ->
-      Syntax.Ctors (Var Int Void) ->
-      [IR.Constructor]
-    makeConstructors paramKinds cs =
-      case cs of
-        Syntax.End -> []
-        Syntax.Ctor ctorName ctorArgs rest ->
-          IR.Constructor
-          { IR.ctorName = ctorName
-          , IR.ctorTyArgs = paramKinds
-          , IR.ctorArgs = (,) Nothing <$> ctorArgs
-          , IR.ctorRetTy = fullyApplied
-          } :
-          makeConstructors paramKinds rest
 
     adtKinds ::
       Map Text Kind ->

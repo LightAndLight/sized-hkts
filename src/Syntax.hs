@@ -52,6 +52,14 @@ instance Eq a => Eq (Type a) where; (==) = eq1
 instance Ord a => Ord (Type a) where; compare = compare1
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
 
+unApply :: Type a -> (Type a, [Type a])
+unApply = go []
+  where
+    go ts t =
+      case t of
+        TApp a b -> go (b:ts) a
+        _ -> (t, ts)
+
 parens :: Text -> Text
 parens a = "(" <> a <> ")"
 
@@ -87,6 +95,12 @@ deriveEq1 ''Ctors
 deriveShow1 ''Ctors
 instance Eq a => Eq (Ctors a) where; (==) = eq1
 instance Show a => Show (Ctors a) where; showsPrec = showsPrec1
+
+ctorsToList :: Ctors a -> [(Text, Vector (Type a))]
+ctorsToList cs =
+  case cs of
+    End -> []
+    Ctor a b c -> (a, b) : ctorsToList c
 
 data ADT
   = ADT

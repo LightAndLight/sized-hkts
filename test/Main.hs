@@ -262,14 +262,11 @@ main =
 
         result `shouldBe`
           Right
-            ( [ IR.Constructor
-                { IR.ctorName = "Pair"
-                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
-                , IR.ctorArgs = [(Nothing, TVar $ B 0), (Nothing, TVar $ B 1)]
-                , IR.ctorRetTy =
-                    foldl @[] TApp (TName "Pair") [TVar $ B 0, TVar $ B 1]
-                }
-              ]
+            ( IR.Struct
+              { IR.datatypeName = "Pair"
+              , IR.datatypeTyArgs = [("A", KType), ("B", KType)]
+              , IR.structFields = [(Nothing, TVar $ B 0), (Nothing, TVar $ B 1)]
+              }
             , KArr KType $ KArr KType KType
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
@@ -301,25 +298,18 @@ main =
           Left err -> expectationFailure $ "Expected success, got failure: " <> show err
           Right (ctors, kind, constraint, size) -> do
             ctors `shouldBe`
-              [ IR.Constructor
-                { IR.ctorName = "Pair"
-                , IR.ctorTyArgs =
-                    [ ("F", KArr KType KType)
-                    , ("A", KType)
-                    , ("B", KType)
-                    ]
-                , IR.ctorArgs =
-                    [ (Nothing, TApp (TVar $ B 0) (TVar $ B 1))
-                    , (Nothing, TApp (TVar $ B 0) (TVar $ B 2))
-                    ]
-                , IR.ctorRetTy =
-                    foldl
-                      @[]
-                      TApp
-                      (TName "Pair")
-                      [TVar $ B 0, TVar $ B 1, TVar $ B 2]
-                }
-              ]
+              IR.Struct
+              { IR.datatypeName = "Pair"
+              , IR.datatypeTyArgs =
+                  [ ("F", KArr KType KType)
+                  , ("A", KType)
+                  , ("B", KType)
+                  ]
+              , IR.structFields =
+                  [ (Nothing, TApp (TVar $ B 0) (TVar $ B 1))
+                  , (Nothing, TApp (TVar $ B 0) (TVar $ B 2))
+                  ]
+              }
             kind `shouldBe` KArr (KArr KType KType) (KArr KType $ KArr KType KType)
             constraint `shouldBe`
               CForall Nothing (KArr KType KType) (CImplies fConstraint $ -- f
@@ -347,33 +337,14 @@ main =
 
         result `shouldBe`
           Right
-            ( [ IR.Constructor
-                { IR.ctorName = "Left"
-                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
-                , IR.ctorArgs =
-                    [ (Nothing, TVar $ B 0)
-                    ]
-                , IR.ctorRetTy =
-                    foldl
-                      @[]
-                      TApp
-                      (TName "Sum")
-                      [TVar $ B 0, TVar $ B 1]
-                }
-              , IR.Constructor
-                { IR.ctorName = "Right"
-                , IR.ctorTyArgs = [("A", KType), ("B", KType)]
-                , IR.ctorArgs =
-                    [ (Nothing, TVar $ B 1)
-                    ]
-                , IR.ctorRetTy =
-                    foldl
-                      @[]
-                      TApp
-                      (TName "Sum")
-                      [TVar $ B 0, TVar $ B 1]
-                }
-              ]
+            ( IR.Enum
+              { IR.datatypeName = "Sum"
+              , IR.datatypeTyArgs = [("A", KType), ("B", KType)]
+              , IR.enumCtors =
+                [ ("Left", [ (Nothing, TVar $ B 0) ])
+                , ("Right", [ (Nothing, TVar $ B 1) ])
+                ]
+              }
             , KArr KType $ KArr KType KType
             -- forall t0. Sized t0 => forall t1. Sized t1 => Sized (Sum t0 t1)
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
@@ -397,16 +368,13 @@ main =
 
         result `shouldBe`
           Right
-            ( [ IR.Constructor
-                { IR.ctorName = "Box"
-                , IR.ctorTyArgs = [("A", KType)]
-                , IR.ctorArgs =
-                    [ (Nothing, TApp TPtr (TVar $ B 0))
-                    ]
-                , IR.ctorRetTy =
-                    TApp (TName "Box") (TVar $ B 0)
+            ( IR.Struct
+              { IR.datatypeName = "Box"
+              , IR.datatypeTyArgs = [("A", KType)]
+              , IR.structFields =
+                  [ (Nothing, TApp TPtr (TVar $ B 0))
+                  ]
                 }
-              ]
             , KArr KType KType
             -- forall t0. Sized (Box t0)
             , CForall Nothing KType .
@@ -534,32 +502,24 @@ main =
           pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
           output =
             C.preamble <>
-            [ C.Function
-                (C.Ptr $ C.Void pairBoolBoolAnn)
-                "Pair_TBool_TBool"
-                [ (C.Ptr $ C.Void pairBoolBoolAnn, "__0")
+            [ C.Typedef (C.Struct [(C.Bool, "_0"), (C.Bool, "_1")]) "Pair_TBool_TBool_t"
+            , C.Function
+                (C.Name "Pair_TBool_TBool_t")
+                "make_Pair_TBool_TBool"
+                [ (C.Bool, "__0")
                 , (C.Bool, "__1")
-                , (C.Bool, "__2")
                 ]
-                [ C.Assign
-                    (C.Deref . C.Cast (C.Ptr C.Bool) $
-                     C.Plus (C.Var "__0") (C.Number 0)
-                    )
-                    (C.Var "__1")
-                , C.Assign
-                    (C.Deref . C.Cast (C.Ptr C.Bool) $
-                     C.Plus (C.Var "__0") (C.Number 1)
-                    )
-                    (C.Var "__2")
-                , C.Return $ C.Var "__0"
+                [ C.Declare
+                    (C.Name "Pair_TBool_TBool_t")
+                    "__2"
+                    (C.Init [(C.Var "__0"), (C.Var "__1")])
+                , C.Return $ C.Var "__2"
                 ]
             , C.Function C.Int32 "main" []
-              [ C.Declare (C.Ptr $ C.Void pairBoolBoolAnn) "__3" $
-                C.Cast (C.Ptr $ C.Void pairBoolBoolAnn) (C.Alloca $ C.Number 2)
-              , C.Declare (C.Ptr $ C.Void pairBoolBoolAnn) "x" $
+              [ C.Declare (C.Name "Pair_TBool_TBool_t") "x" $
                 C.Call
-                  (C.Var "Pair_TBool_TBool")
-                  [C.Var "__3", C.BTrue, C.BFalse]
+                  (C.Var "make_Pair_TBool_TBool")
+                  [C.BTrue, C.BFalse]
               , C.Return $ C.Number 99
               ]
             ]

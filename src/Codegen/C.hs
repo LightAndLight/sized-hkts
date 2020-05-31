@@ -38,6 +38,8 @@ data CType
   | Int32
   | Int64
   | Bool
+  | Name Text
+  | Struct (Vector (CType, Text))
   deriving (Eq, Show)
 
 data CExpr
@@ -52,6 +54,7 @@ data CExpr
   | Index CExpr Word64
   | Cast CType CExpr
   | Plus CExpr CExpr
+  | Init (Vector CExpr)
   deriving (Eq, Show)
 
 data CStatement
@@ -62,6 +65,8 @@ data CStatement
 
 data CDecl
   = Include Text
+  | Union Text (Vector (CType, Text))
+  | Typedef CType Text
   | Function CType Text (Vector (CType, Text)) [CStatement]
   deriving (Eq, Show)
 
@@ -118,6 +123,7 @@ prettyCExpr e =
       prettyCExpr a <>
       " + " <>
       prettyCExpr b
+    Init as -> "{" <> intersperseMap ", " prettyCExpr as <> "}"
 
 prettyCType :: CType -> Text
 prettyCType t =
@@ -135,6 +141,11 @@ prettyCType t =
     Int32 -> "int32_t"
     Int64 -> "int64_t"
     Bool -> "bool"
+    Name n -> n
+    Struct fs ->
+      "struct { " <>
+      foldMap (\(ft, fn) -> prettyCType ft <> " " <> fn <> "; ") fs <>
+      "}"
 
 prettyCStatement :: CStatement -> Text
 prettyCStatement s =
@@ -149,13 +160,38 @@ prettyCDecl d =
     Include n -> "#include " <> n
     Function ty n args body ->
       prettyCType ty <> " " <> n <>
-      "(" <> intersperseMap ", " (\(argTy, argName) -> prettyCType argTy <> " " <> argName) args <> ")" <>
+      "(" <> intersperseMap ", " (\(argTy, argName) -> prettyCType argTy <> " " <> argName) args <> ") " <>
       "{\n\n" <>
       foldMap (\s -> prettyCStatement s <> ";\n") body <>
       "\n}"
+    Typedef t n ->
+      "typedef " <> prettyCType t <> " " <> n
+    Union n vs ->
+      "typedef union " <> n <> "{\n" <>
+      foldMap
+        (\(vt, vn) -> prettyCType vt <> " " <> vn <> ";\n")
+        vs <>
+      "} " <> n
 
 prettyCDecls :: [CDecl] -> Text
-prettyCDecls = intersperseMap "\n\n" prettyCDecl
+prettyCDecls =
+  intersperseMap
+    "\n"
+    (\d ->
+       (case d of
+          Typedef{} -> "\n"
+          Function{} -> "\n"
+          Union{} -> "\n"
+          _ -> mempty
+       ) <>
+       prettyCDecl d <>
+       (case d of
+          Typedef{} -> ";"
+          Function{} -> ""
+          Union{} -> ""
+          _ -> mempty
+       )
+    )
 
 preamble :: [CDecl]
 preamble =
