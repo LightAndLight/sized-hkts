@@ -2,6 +2,7 @@
 {-# language DeriveFunctor #-}
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
+{-# language QuantifiedConstraints #-}
 {-# language TemplateHaskell #-}
 {-# language ViewPatterns #-}
 module Typecheck
@@ -49,6 +50,8 @@ import TCState
   , getTMeta
   , freshTMeta
   , requiredConstraints
+  , solveTMetas_Type
+  , HasDatatypeFields, getFieldType
   )
 
 applyTSubs_Constraint ::
@@ -189,6 +192,7 @@ instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
 inferExpr ::
   ( MonadState (s ty) m
   , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
+  , forall x. HasDatatypeFields (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -325,6 +329,27 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         , irType = TypeM $ Syntax.TVar (Left meta)
         }
 
+    Syntax.Project a field -> do
+      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
+      aTy <- solveTMetas_Type id . unTypeM $ irType aResult
+      let (t, ts) = Syntax.unApply aTy
+      case t of
+        Syntax.TName n -> do
+          let field' = IR.parseProjection field
+          m_fieldType <- getFieldType n field'
+          case m_fieldType of
+            Nothing -> throwError $ Doesn'tHaveField (tyNames <$> TypeM aTy) field
+            Just fieldType ->
+              let
+                fieldType' = fieldType >>= unvar (ts !!) absurd
+              in
+                pure $
+                InferResult
+                { irExpr = IR.Project (irExpr aResult) field'
+                , irType = TypeM fieldType'
+                }
+        _ -> throwError $ Can'tInfer (tmNames <$> expr)
+
 data CheckResult ty tm
   = CheckResult
   { crExpr :: IR.Expr (Either TMeta ty) tm
@@ -333,6 +358,7 @@ data CheckResult ty tm
 checkExpr ::
   ( MonadState (s ty) m
   , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
+  , forall x. HasDatatypeFields (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -578,3 +604,4 @@ zonkExprTypes e =
         (either (error . ("zonking found: " <>) . show) pure)
         t
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
+    IR.Project a b -> (\a' -> IR.Project a' b) <$> zonkExprTypes a

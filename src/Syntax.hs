@@ -123,6 +123,8 @@ data Expr a
 
   | New (Expr a)
   | Deref (Expr a)
+
+  | Project (Expr a) Text
   deriving (Functor, Foldable, Traversable)
 deriveEq1 ''Expr
 deriveShow1 ''Expr
@@ -142,6 +144,7 @@ instance Monad Expr where
       BFalse -> BFalse
       New v -> New (v >>= f)
       Deref p -> Deref (p >>= f)
+      Project a field -> Project (a >>= f) field
 
 data Function
   = Function

@@ -10,7 +10,7 @@ import Control.Lens.Getter (view)
 import Control.Lens.Setter ((%=), (.~))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State (MonadState, evalState, runStateT)
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', for_)
 import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -25,7 +25,7 @@ import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
 import qualified Codegen
 import qualified Codegen.C as C
 import qualified IR
-import TCState (FilterTypes, HasTypeMetas, HasKindMetas, emptyTCState)
+import TCState (FilterTypes, HasDatatypeFields, HasTypeMetas, HasKindMetas, emptyTCState, datatypeFields)
 import qualified Size.Builtins as Size
 import qualified Syntax
 
@@ -62,6 +62,7 @@ compile decls = do
       ( MonadState (s (Var Int Void)) m
       , FilterTypes s
       , HasTypeMetas s
+      , forall x. HasDatatypeFields (s x)
       , forall x. HasKindMetas (s x)
       , forall x. HasSizeMetas (s x)
       , forall x. HasGlobalTheory (s x)
@@ -84,6 +85,8 @@ compile decls = do
               (adt, kind, axiom, size) <- checkADT kindScope name params ctors
               let ctorsDecls = IR.datatypeConstructors adt
               globalTheory %= Map.insert axiom size
+              for_ (IR.makeDatatypeFields adt) $ \fs ->
+                datatypeFields %= Map.insert name fs
               (kindScope', tyScope', rest') <-
                 checkDecls
                   (Map.insert name kind kindScope)

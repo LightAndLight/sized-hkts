@@ -20,4 +20,5 @@ data TypeError
   | NotInScope Text
   | TNotInScope Text
   | CouldNotDeduce (Constraint (Either TMeta Text))
+  | Doesn'tHaveField (TypeM Text) Text
   deriving (Eq, Show)

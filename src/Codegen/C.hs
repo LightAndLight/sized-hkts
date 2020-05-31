@@ -55,6 +55,7 @@ data CExpr
   | Cast CType CExpr
   | Plus CExpr CExpr
   | Init (Vector CExpr)
+  | Project CExpr Text
   deriving (Eq, Show)
 
 data CStatement
@@ -116,6 +117,7 @@ prettyCExpr e =
       parens (prettyCType t) <>
       (case a of
          Cast{} -> parens
+         Deref{} -> parens
          Plus{} -> parens
          _ -> id
       ) (prettyCExpr a)
@@ -124,6 +126,14 @@ prettyCExpr e =
       " + " <>
       prettyCExpr b
     Init as -> "{" <> intersperseMap ", " prettyCExpr as <> "}"
+    Project a b ->
+      (case a of
+         Cast{} -> parens
+         Plus{} -> parens
+         _ -> id
+      )
+      (prettyCExpr a) <>
+      "." <> b
 
 prettyCType :: CType -> Text
 prettyCType t =

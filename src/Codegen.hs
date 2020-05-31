@@ -342,6 +342,13 @@ genExpr vars expr =
         ]
       pure $ C.Var n1
     IR.Deref a -> C.Deref <$> genExpr vars a
+    IR.Project a b -> do
+      a' <- genExpr vars a
+      case b of
+        IR.Numeric ix ->
+          pure $ C.Project a' (Text.pack $ '_' : show ix)
+        IR.Field n ->
+          pure $ C.Project a' n
 
 genConstructor ::
   (MonadState Code m) =>

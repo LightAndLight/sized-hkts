@@ -46,7 +46,7 @@ import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import TCState
   ( TCState, TMeta(..), TMeta, pattern TypeM
-  , HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
+  , HasDatatypeFields(..), HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
   , freshTMeta
   , FilterTypes, filterTypes, mapTypes
   , solveMetas_Constraint
@@ -140,6 +140,9 @@ instance HasKindMetas (tc ty) => HasKindMetas (EntailState tc ty) where
 
 instance HasSizeMetas (EntailState tc ty) where
   nextSMeta = entailSizeMeta
+
+instance HasDatatypeFields (tc ty) => HasDatatypeFields (EntailState tc ty) where
+  datatypeFields = entailTCState.datatypeFields
 
 emptyEntailState :: tc ty -> EntailState tc ty
 emptyEntailState tc =

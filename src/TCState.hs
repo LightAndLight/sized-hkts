@@ -20,14 +20,17 @@ module TCState
   , getTMeta, getKMeta
   , getTMetaKind
   , solveKMetas, solveKMetasMaybe
+  , solveTMetas_Type
   , solveTMetas_Expr
   , solveMetas_Constraint
+  , HasDatatypeFields(..)
+  , getFieldType
   )
 where
 
 import Bound.Var (Var(..))
 import Control.Applicative (empty)
-import Control.Lens.Getter ((^.), use)
+import Control.Lens.Getter ((^.), use, uses)
 import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((%=), (.=))
 import Control.Lens.TH (makeLenses)
@@ -41,6 +44,8 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Vector as Vector
 import Data.Void (Void)
 
 import IR (Constraint, KMeta(..), Kind(..))
@@ -59,7 +64,6 @@ pattern TypeM a = ExceptT a
 unTypeM :: TypeM ty -> Type (Either TMeta ty)
 unTypeM = runExceptT
 
-
 data TCState ty
   = TCState
   { _tcsKindMeta :: KMeta
@@ -69,6 +73,7 @@ data TCState ty
   , _tcsTypeSolutions :: Map TMeta (TypeM ty)
   , _tcsConstraints :: Set (Constraint (Either TMeta ty))
   , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
+  , _tcsDatatypeFields :: Map Text IR.Fields
   }
 makeLenses ''TCState
 
@@ -82,6 +87,7 @@ emptyTCState =
   , _tcsTypeSolutions = mempty
   , _tcsConstraints = mempty
   , _tcsGlobalTheory = mempty
+  , _tcsDatatypeFields = mempty
   }
 
 class FilterTypes s where
@@ -314,3 +320,27 @@ solveTMetas_Expr = go
         IR.BFalse -> pure $ IR.BFalse
         IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t
         IR.Deref a -> IR.Deref <$> go a
+        IR.Project a b -> (\a' -> IR.Project a' b) <$> go a
+
+class HasDatatypeFields s where
+  datatypeFields :: Lens' s (Map Text IR.Fields)
+
+instance HasDatatypeFields (TCState ty) where
+  datatypeFields = tcsDatatypeFields
+
+getFieldType ::
+  (MonadState s m, HasDatatypeFields s) =>
+  Text ->
+  IR.Projection ->
+  m (Maybe (Type (Var Int Void)))
+getFieldType tyName prj = do
+  m_fs <- uses datatypeFields $ Map.lookup tyName
+  pure $ case prj of
+    IR.Numeric ix ->
+      case m_fs of
+        Just (IR.Unnamed fs) -> Just $ fs Vector.! fromIntegral ix
+        _ -> Nothing
+    IR.Field n ->
+      case m_fs of
+        Just (IR.Named fs) -> Map.lookup n fs
+        _ -> Nothing

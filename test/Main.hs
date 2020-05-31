@@ -529,3 +529,61 @@ main =
             "Expected success, got " <> show err
           Right code -> do
             code `shouldBe` output
+      it "5" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "Pair"
+              , Syntax.adtArgs = ["A", "B"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Pair" [TVar $ B 0, TVar $ B 1] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcBody =
+                  Syntax.Let
+                    [ ( "x"
+                      , Syntax.Call
+                          (Syntax.Name "Pair")
+                          [Syntax.Number 22, Syntax.Number 33]
+                      )
+                    ]
+                    (Syntax.Project (Syntax.Name "x") "0")
+              }
+            ]
+          pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
+          output =
+            C.preamble <>
+            [ C.Typedef (C.Struct [(C.Bool, "_0"), (C.Bool, "_1")]) "Pair_TBool_TBool_t"
+            , C.Function
+                (C.Name "Pair_TBool_TBool_t")
+                "make_Pair_TBool_TBool"
+                [ (C.Bool, "__0")
+                , (C.Bool, "__1")
+                ]
+                [ C.Declare
+                    (C.Name "Pair_TBool_TBool_t")
+                    "__2"
+                    (C.Init [(C.Var "__0"), (C.Var "__1")])
+                , C.Return $ C.Var "__2"
+                ]
+            , C.Function C.Int32 "main" []
+              [ C.Declare (C.Name "Pair_TBool_TBool_t") "x" $
+                C.Call
+                  (C.Var "make_Pair_TBool_TBool")
+                  [C.Number 22, C.Number 33]
+              , C.Return $ C.Project (C.Var "x") "_0"
+              ]
+            ]
+        case Compile.compile input of
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
+          Right code -> do
+            code `shouldBe` output

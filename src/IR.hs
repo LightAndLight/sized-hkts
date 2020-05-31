@@ -1,6 +1,6 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language FlexibleContexts #-}
-{-# language OverloadedLists #-}
+{-# language OverloadedLists, OverloadedStrings #-}
 {-# language TemplateHaskell #-}
 {-# language TypeApplications #-}
 module IR where
@@ -11,13 +11,29 @@ import Control.Lens.Tuple (_1)
 import Data.Bifunctor (bimap)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1, deriveEq2, deriveShow2)
 import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compare1, showsPrec1)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import Data.Vector (Vector)
+import qualified Data.Vector as Vector
 import Data.Void (Void)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Int (Int8, Int16, Int32, Int64)
+import qualified Data.Text.Read as Text (decimal)
 
 import Syntax (Type(..))
+
+data Projection
+  = Numeric Word64
+  | Field Text
+  deriving (Eq, Show)
+
+parseProjection :: Text -> Projection
+parseProjection a =
+  case Text.decimal a of
+    Right (n, "") -> Numeric n
+    _ -> Field a
 
 data Expr ty tm
   = Var tm
@@ -43,6 +59,8 @@ data Expr ty tm
 
   | New (Expr ty tm) (Type ty)
   | Deref (Expr ty tm)
+
+  | Project (Expr ty tm) Projection
   deriving (Functor, Foldable, Traversable)
 deriveEq2 ''Expr
 deriveShow2 ''Expr
@@ -76,6 +94,7 @@ bindType_Expr f e =
     BFalse -> BFalse
     New a t -> New (bindType_Expr f a) (t >>= f)
     Deref a -> Deref $ bindType_Expr f a
+    Project a b -> Project (bindType_Expr f a) b
 
 newtype KMeta = KMeta Int
   deriving (Eq, Ord, Show)
@@ -152,6 +171,39 @@ data Datatype
   , datatypeTyArgs :: Vector (Text, Kind)
   , enumCtors :: Vector (Text, Vector (Maybe Text, Type (Var Int Void)))
   } deriving (Eq, Show)
+
+data Fields
+  = Unnamed (Vector (Type (Var Int Void)))
+  | Named (Map Text (Type (Var Int Void)))
+
+makeDatatypeFields :: Datatype -> Maybe Fields
+makeDatatypeFields adt =
+  case adt of
+    Empty{} -> Just $ Unnamed mempty
+    Struct _ _ fs -> Just . either (Unnamed . Vector.fromList) Named $ namedOrUnnamed fs
+    Enum{} -> Nothing
+  where
+    namedOrUnnamed =
+      Maybe.fromJust .
+      foldr
+        (\(m_n, t) rest ->
+          case rest of
+            Nothing ->
+              Just $
+              maybe
+                (Left [t])
+                (\n -> Right $ Map.singleton n t)
+                m_n
+            Just (Left unnamed) ->
+              case m_n of
+                Just{} -> error $ "makeDatatypeFields: mix of named an unnamed fields in " <> show adt
+                Nothing -> Just . Left $ t : unnamed
+            Just (Right named) ->
+              case m_n of
+                Nothing -> error $ "makeDatatypeFields: mix of named an unnamed fields in " <> show adt
+                Just n -> Just . Right $ Map.insert n t named
+        )
+        Nothing
 
 data Origin
   = ODatatype
