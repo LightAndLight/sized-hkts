@@ -54,7 +54,7 @@ data Code
   , _codeCompiledNames ::
       Map
         (IR.Origin, Text, Vector (Syntax.Type Void))
-        (Text, Maybe CDecl) -- Nothing indicates that this code is currently being compiled
+        (Text, Maybe [CDecl]) -- Nothing indicates that this code is currently being compiled
   , _codeSupply :: Int
   }
 makeLenses ''Code
@@ -135,7 +135,7 @@ genDatatype ::
   (MonadState Code m) =>
   IR.Datatype ->
   Vector (Syntax.Type Void) ->
-  m CDecl
+  m [CDecl]
 genDatatype adt ts =
   case adt of
     IR.Empty adtName tyArgs ->
@@ -143,7 +143,7 @@ genDatatype adt ts =
         !True = correctSize adtName (length tyArgs)
         fullName = adtName <> typeSuffix ts <> "_t"
       in
-        pure $ C.Typedef (C.Void Nothing) fullName
+        pure [C.Typedef (C.Void Nothing) fullName]
     IR.Struct adtName tyArgs fields -> do
       let
         !True = correctSize adtName (length tyArgs)
@@ -152,28 +152,39 @@ genDatatype adt ts =
         fields_inst = (fmap.fmap) inst fields
         namedFields = nameFields fields_inst
 
-      (\fs' -> C.Typedef (C.Struct fs') fullName) <$>
+      (\fs' ->
+         [ C.Typedef (C.Name $ "struct " <> fullName) fullName
+         , C.Struct fullName fs'
+         ]
+        ) <$>
         traverse (\(n, t) -> (,) <$> genType t <*> pure n) namedFields
-    IR.Enum adtName tyArgs ctors ->
+    IR.Enum adtName tyArgs ctors -> do
       let
         !True = correctSize adtName (length tyArgs)
         fullName = adtName <> typeSuffix ts <> "_t"
 
         ctors_inst = (fmap.fmap.fmap.fmap) inst ctors
-      in
-        C.Union fullName <$>
+      unionMembers <-
         traverse
           (\(cname, cty) ->
              case Vector.length cty of
-               0 -> pure (C.Void Nothing, cname)
+               0 -> pure (C.TStruct [], cname)
                1 | (Nothing, ctyTy) <- cty Vector.! 0 -> do
                  (,) <$> genType ctyTy <*> pure cname
                _ ->
-                 (,) . C.Struct <$>
+                 (,) . C.TStruct <$>
                  traverse (\(n, t) -> (,) <$> genType t <*> pure n) (nameFields cty) <*>
                  pure cname
           )
           ctors_inst
+      pure
+        [ C.Typedef (C.Name $ "struct " <> fullName) fullName
+        , C.Struct
+            fullName
+            [ (C.UInt8, "tag")
+            , (C.Union unionMembers, "data")
+            ]
+        ]
   where
     nameFields fs =
       let
@@ -219,7 +230,7 @@ genInst name ts = do
                 IR.DFunc func -> genFunction func ts
                 IR.DData{} -> error $ "genInst: got Data"
                 IR.DCtor{} -> error $ "genInst: got Ctor"
-        codeCompiledNames %= Map.insert key (realName, Just code)
+        codeCompiledNames %= Map.insert key (realName, Just [code])
         pure realName
       Just (realName, _) -> pure realName
   pure $ C.Var name'
@@ -246,7 +257,7 @@ genCtor name ts = do
                 IR.DFunc{} -> error $ "genCtor: got Func"
                 IR.DCtor ctor -> genConstructor ctor ts
                 IR.DData{} -> error $ "genCtor: got Data"
-        codeCompiledNames %= Map.insert key (realName, Just code)
+        codeCompiledNames %= Map.insert key (realName, Just [code])
         pure realName
       Just (realName, _) -> pure realName
   pure $ C.Var name'
@@ -336,7 +347,7 @@ genConstructor ::
   IR.Constructor ->
   Vector (Syntax.Type Void) ->
   m CDecl
-genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
+genConstructor (IR.Constructor name ctorSort tyArgs args retTy) tyArgs' =
   let
     tyArgsLen = length tyArgs
   in
@@ -368,7 +379,15 @@ genConstructor (IR.Constructor name tyArgs args retTy) tyArgs' =
             retTy_instGen
             ("make_" <> name <> typeSuffix tyArgs')
             args_inst'
-            [ C.Declare retTy_instGen destName . C.Init $ C.Var . snd <$> args_inst'
+            [ case ctorSort of
+                IR.StructCtor ->
+                  C.Declare retTy_instGen destName . C.Init $ C.Var . snd <$> args_inst'
+                IR.EnumCtor tag ->
+                  C.Declare retTy_instGen destName $
+                  C.Init
+                  [ C.Number $ fromIntegral tag
+                  , C.InitNamed [(name, C.Init $ C.Var . snd <$> args_inst')]
+                  ]
             , C.Return $ C.Var destName
             ]
 
@@ -416,7 +435,7 @@ genDecls = do
     (\(n, (_, m_decl)) rest ->
        case m_decl of
          Nothing -> error $ "genDecls: no decl for " <> show n
-         Just decl -> pure $ decl : rest
+         Just decls -> pure $ decls <> rest
     )
     []
     names

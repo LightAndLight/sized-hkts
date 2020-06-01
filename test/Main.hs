@@ -12,7 +12,7 @@ import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
--- import qualified Data.Text.IO as Text
+import qualified Data.Text.IO as Text
 import Data.Void (Void, absurd)
 import Test.Hspec
 
@@ -502,7 +502,8 @@ main =
           pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
           output =
             C.preamble <>
-            [ C.Typedef (C.Struct [(C.Bool, "_0"), (C.Bool, "_1")]) "Pair_TBool_TBool_t"
+            [ C.Typedef (C.Name $ "struct Pair_TBool_TBool_t") "Pair_TBool_TBool_t"
+            , C.Struct "Pair_TBool_TBool_t" [(C.Bool, "_0"), (C.Bool, "_1")]
             , C.Function
                 (C.Name "Pair_TBool_TBool_t")
                 "make_Pair_TBool_TBool"
@@ -557,10 +558,10 @@ main =
                     (Syntax.Project (Syntax.Name "x") "0")
               }
             ]
-          pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
           output =
             C.preamble <>
-            [ C.Typedef (C.Struct [(C.Int32, "_0"), (C.Int32, "_1")]) "Pair_TInt32_TInt32_t"
+            [ C.Typedef (C.Name $ "struct Pair_TInt32_TInt32_t") "Pair_TInt32_TInt32_t"
+            , C.Struct "Pair_TInt32_TInt32_t" [(C.Int32, "_0"), (C.Int32, "_1")]
             , C.Function
                 (C.Name "Pair_TInt32_TInt32_t")
                 "make_Pair_TInt32_TInt32"
@@ -579,6 +580,59 @@ main =
                   (C.Var "make_Pair_TInt32_TInt32")
                   [C.Number 22, C.Number 33]
               , C.Return $ C.Project (C.Var "x") "_0"
+              ]
+            ]
+        case Compile.compile input of
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
+          Right code -> do
+            code `shouldBe` output
+      it "6" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "List"
+              , Syntax.adtArgs = ["A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Nil" [] $
+                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt32
+              , Syntax.funcBody =
+                  Syntax.Let
+                    [("x", Syntax.Call (Syntax.Name "Nil") [])]
+                    (Syntax.Number 0)
+              }
+            ]
+          output =
+            C.preamble <>
+            [ C.Typedef (C.Name "struct List_TInt32_t") "List_TInt32_t"
+            , C.Struct "List_TInt32_t"
+              [ (C.UInt8, "tag")
+              , ( C.Union
+                  [ (C.TStruct [],"Nil")
+                  , (C.TStruct [(C.Int32,"_0"), (C.Ptr (C.Name "List_TInt32_t"),"_1")],"Cons")
+                  ]
+                , "data"
+                )
+              ]
+            , C.Function (C.Name "List_TInt32_t") "make_Nil_TInt32" []
+              [ C.Declare (C.Name "List_TInt32_t") "__0" $
+                C.Init [C.Number 0, C.InitNamed [("Nil", C.Init [])]]
+              , C.Return (C.Var "__0")
+              ]
+            , C.Function C.Int32 "main" []
+              [ C.Declare (C.Name "List_TInt32_t") "x" $
+                C.Call (C.Var "make_Nil_TInt32") []
+              , C.Return $ C.Number 0
               ]
             ]
         case Compile.compile input of

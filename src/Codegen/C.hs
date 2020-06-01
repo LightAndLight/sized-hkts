@@ -30,9 +30,11 @@ data CType
   | FunPtr CType (Vector CType)
   | Void (Maybe Ann)
   | Int32
+  | UInt8
   | Bool
   | Name Text
-  | Struct (Vector (CType, Text))
+  | TStruct (Vector (CType, Text))
+  | Union (Vector (CType, Text))
   deriving (Eq, Show)
 
 data CExpr
@@ -48,6 +50,7 @@ data CExpr
   | Cast CType CExpr
   | Plus CExpr CExpr
   | Init (Vector CExpr)
+  | InitNamed (Vector (Text, CExpr))
   | Project CExpr Text
   deriving (Eq, Show)
 
@@ -59,8 +62,8 @@ data CStatement
 
 data CDecl
   = Include Text
-  | Union Text (Vector (CType, Text))
   | Typedef CType Text
+  | Struct Text (Vector (CType, Text))
   | Function CType Text (Vector (CType, Text)) [CStatement]
   deriving (Eq, Show)
 
@@ -119,6 +122,7 @@ prettyCExpr e =
       " + " <>
       prettyCExpr b
     Init as -> "{" <> intersperseMap ", " prettyCExpr as <> "}"
+    InitNamed as -> "{" <> intersperseMap ", " (\(a, b) -> "." <> a <> " = " <> prettyCExpr b) as <> "}"
     Project a b ->
       (case a of
          Cast{} -> parens
@@ -136,11 +140,18 @@ prettyCType t =
     Void m_ann  ->
       "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
     Int32 -> "int32_t"
+    UInt8 -> "uint8_t"
     Bool -> "bool"
     Name n -> n
-    Struct fs ->
+    TStruct fs ->
       "struct { " <>
       foldMap (\(ft, fn) -> prettyCType ft <> " " <> fn <> "; ") fs <>
+      "}"
+    Union vs ->
+      "union {\n" <>
+      foldMap
+        (\(vt, vn) -> prettyCType vt <> " " <> vn <> ";\n")
+        vs <>
       "}"
 
 prettyCStatement :: CStatement -> Text
@@ -162,12 +173,10 @@ prettyCDecl d =
       "\n}"
     Typedef t n ->
       "typedef " <> prettyCType t <> " " <> n
-    Union n vs ->
-      "typedef union " <> n <> "{\n" <>
-      foldMap
-        (\(vt, vn) -> prettyCType vt <> " " <> vn <> ";\n")
-        vs <>
-      "} " <> n
+    Struct n fs ->
+      "struct " <> n <> " {\n" <>
+      foldMap (\(ft, fn) -> prettyCType ft <> " " <> fn <> ";\n") fs <>
+      "}"
 
 prettyCDecls :: [CDecl] -> Text
 prettyCDecls =
@@ -177,14 +186,14 @@ prettyCDecls =
        (case d of
           Typedef{} -> "\n"
           Function{} -> "\n"
-          Union{} -> "\n"
+          Struct{} -> "\n"
           _ -> mempty
        ) <>
        prettyCDecl d <>
        (case d of
           Typedef{} -> ";"
+          Struct{} -> ";"
           Function{} -> ""
-          Union{} -> ""
           _ -> mempty
        )
     )

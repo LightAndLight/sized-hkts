@@ -18,7 +18,7 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
-import Data.Word (Word64)
+import Data.Word (Word8, Word64)
 import Data.Int (Int32)
 import qualified Data.Text.Read as Text (decimal)
 
@@ -133,9 +133,15 @@ data Function
         (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
+data CtorSort
+  = StructCtor
+  | EnumCtor Word8
+  deriving (Eq, Show)
+
 data Constructor
   = Constructor
   { ctorName :: Text
+  , ctorSort :: CtorSort
   , ctorTyArgs :: Vector (Text, Kind)
   , ctorArgs :: Vector (Maybe Text, Type (Var Int Void))
   , ctorRetTy :: Type (Var Int Void)
@@ -221,6 +227,7 @@ datatypeConstructors adt =
     Struct name params fields ->
       [ Constructor
         { ctorName = name
+        , ctorSort = StructCtor
         , ctorTyArgs = params
         , ctorArgs = fields
         , ctorRetTy =
@@ -238,18 +245,19 @@ datatypeConstructors adt =
             (TName name)
             [0..length params-1]
       in
-        (\(cn, fields) ->
+        (\(tag, (cn, fields)) ->
           Constructor
           { ctorName = cn
+          , ctorSort = EnumCtor tag
           , ctorTyArgs = params
           , ctorArgs = fields
           , ctorRetTy = retTy
           }
         ) <$>
-        ctors
+        Vector.zip [0..] ctors
 
 constructorToTypeScheme :: Constructor -> TypeScheme Void
-constructorToTypeScheme (Constructor _ tyArgs args retTy) =
+constructorToTypeScheme (Constructor _ _ tyArgs args retTy) =
   TypeScheme
   { schemeOrigin = OConstructor
   , schemeTyArgs = tyArgs
