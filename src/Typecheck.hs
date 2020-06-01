@@ -374,102 +374,13 @@ checkExpr ::
   Syntax.Expr tm ->
   TypeM ty ->
   m (CheckResult ty tm)
-checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
-  case expr of
-    Syntax.New a -> do
-      aTy <- Syntax.TVar . Left <$> freshTMeta KType
-      let expected = Syntax.TApp Syntax.TPtr aTy
-      unifyType
-        kindScope
-        (Right . tyNames)
-        kinds
-        (TypeM expected)
-        ty
-      a' <-
-        checkExpr
-          kindScope
-          tyScope
-          letScope
-          tyNames
-          tmNames
-          kinds
-          types
-          a
-          (TypeM aTy)
-      pure $ CheckResult { crExpr = IR.New (crExpr a') aTy }
-    Syntax.Call name args -> do
-      name' <-
-        inferExpr
-          kindScope
-          tyScope
-          letScope
-          tyNames
-          tmNames
-          kinds
-          types
-          name
-      expectedArgs <- fmap (Syntax.TVar . Left) <$> Vector.replicateM (length args) (freshTMeta KType)
-      let expected = Syntax.TApp (Syntax.TFun expectedArgs) (unTypeM ty)
-      unifyType kindScope (Right . tyNames) kinds (TypeM expected) (irType name')
-      args' <-
-        traverse
-          (\(e, t) -> checkExpr kindScope tyScope letScope tyNames tmNames kinds types e (TypeM t))
-          (Vector.zip args expectedArgs)
-      pure $
-        CheckResult
-        { crExpr =
-          IR.Call (irExpr name') (crExpr <$> args') (unTypeM ty)
-        }
-    Syntax.Let bindings rest -> do
-      bindingTypes <-
-        foldlM
-          (\acc (n, _) -> do
-             m <- freshTMeta KType
-             pure $ Map.insert n (TypeM . Syntax.TVar $ Left m) acc
-          )
-          mempty
-          bindings
-      rest' <-
-        checkExpr
-          kindScope
-          tyScope
-          (bindingTypes <> letScope)
-          tyNames
-          tmNames
-          kinds
-          types
-          rest
-          ty
-      (bindings', _) <-
-        foldlM
-          (\(bs', letScope') (bn, be) -> do
-             let bt = bindingTypes Map.! bn
-             be' <-
-               checkExpr
-                 kindScope
-                 tyScope
-                 (letScope' <> letScope)
-                 tyNames
-                 tmNames
-                 kinds
-                 types
-                 be
-                 bt
-             pure
-               ( Vector.snoc bs' ((bn, crExpr be'), unTypeM bt)
-               , Map.insert bn bt letScope'
-               )
-          )
-          (mempty, mempty)
-          bindings
-      pure $ CheckResult { crExpr = IR.Let bindings' (crExpr rest')}
-    _ -> do
-      exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
-      unifyType kindScope (Right . tyNames) kinds ty (irType exprResult)
-      pure $
-        CheckResult
-        { crExpr = irExpr exprResult
-        }
+checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty = do
+  exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
+  unifyType kindScope (Right . tyNames) kinds ty (irType exprResult)
+  pure $
+    CheckResult
+    { crExpr = irExpr exprResult
+    }
 
 zonkExprTypes ::
   Monad m =>
