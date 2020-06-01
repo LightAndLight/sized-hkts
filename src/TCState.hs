@@ -1,11 +1,11 @@
 {-# language DeriveFunctor #-}
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language FunctionalDependencies, MultiParamTypeClasses, TypeFamilies #-}
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 module TCState
-  ( TMeta(..), TypeM, pattern TypeM, unTypeM
-  , TCState
+  ( TCState
   , emptyTCState
   , tcsKindMeta
   , tcsKindSolutions
@@ -34,7 +34,7 @@ import Control.Lens.Getter ((^.), use, uses)
 import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((%=), (.=))
 import Control.Lens.TH (makeLenses)
-import Control.Monad.Except (ExceptT(..), runExceptT)
+import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
@@ -48,21 +48,11 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
 
+import Check.TypeError (TypeError(..))
 import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
 import Size (Size)
-import Syntax (Type(..))
-
-newtype TMeta = TMeta Int
-  deriving (Eq, Ord, Show)
-
-type TypeM = ExceptT TMeta Type
-
-pattern TypeM :: Type (Either TMeta ty) -> TypeM ty
-pattern TypeM a = ExceptT a
-
-unTypeM :: TypeM ty -> Type (Either TMeta ty)
-unTypeM = runExceptT
+import Syntax (TMeta(..), Type(..), TypeM, unTypeM)
 
 data TCState ty
   = TCState
@@ -321,18 +311,23 @@ instance HasDatatypeFields (TCState ty) where
   datatypeFields = tcsDatatypeFields
 
 getFieldType ::
-  (MonadState s m, HasDatatypeFields s) =>
+  ( MonadState s m, HasDatatypeFields s
+  , MonadError TypeError m
+  ) =>
   Text ->
   IR.Projection ->
   m (Maybe (Type (Var Int Void)))
 getFieldType tyName prj = do
   m_fs <- uses datatypeFields $ Map.lookup tyName
-  pure $ case prj of
-    IR.Numeric ix ->
-      case m_fs of
-        Just (IR.Unnamed fs) -> Just $ fs Vector.! fromIntegral ix
-        _ -> Nothing
-    IR.Field n ->
-      case m_fs of
-        Just (IR.Named fs) -> Map.lookup n fs
-        _ -> Nothing
+  case m_fs of
+    Nothing -> throwError $ TNotInScope tyName
+    Just fs ->
+      pure $ case prj of
+        IR.Numeric ix ->
+          case fs of
+            IR.Unnamed fs' -> Just $ fs' Vector.! fromIntegral ix
+            _ -> Nothing
+        IR.Field n ->
+          case fs of
+            IR.Named fs' -> Map.lookup n fs'
+            _ -> Nothing

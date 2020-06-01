@@ -3,8 +3,7 @@ module Check.TypeError where
 import Data.Text (Text)
 
 import IR (Constraint, KMeta, Kind)
-import Syntax (Expr)
-import TCState (TMeta, TypeM)
+import Syntax (Expr, TMeta, TypeM)
 
 data TypeError
   = MissingKMeta KMeta

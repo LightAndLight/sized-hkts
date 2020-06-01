@@ -44,8 +44,9 @@ import Data.Void (Void, absurd)
 import Check.TypeError (TypeError(..))
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
+import Syntax (TMeta(..), TMeta, pattern TypeM)
 import TCState
-  ( TCState, TMeta(..), TMeta, pattern TypeM
+  ( TCState
   , HasDatatypeFields(..), HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
   , freshTMeta
   , FilterTypes, filterTypes, mapTypes

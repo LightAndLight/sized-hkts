@@ -32,9 +32,9 @@ import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
 import qualified IR
-import Syntax (Type(..))
+import Syntax (Type(..), TMeta)
 import qualified Syntax
-import TCState (TMeta, emptyTCState)
+import TCState (emptyTCState)
 import Typecheck (sizeConstraintFor)
 
 main :: IO ()

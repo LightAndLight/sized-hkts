@@ -1,11 +1,13 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language OverloadedStrings #-}
+{-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 module Syntax where
 
 import Bound.TH (makeBound)
 import Bound.Var (Var)
 import Control.Monad (ap)
+import Control.Monad.Except (ExceptT(..), runExceptT)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1)
 import Data.Foldable (fold)
 import Data.Functor.Classes (eq1, compare1, showsPrec1)
@@ -38,6 +40,18 @@ unApply = go []
       case t of
         TApp a b -> go (b:ts) a
         _ -> (t, ts)
+
+newtype TMeta = TMeta Int
+  deriving (Eq, Ord, Show)
+
+type TypeM = ExceptT TMeta Type
+
+pattern TypeM :: Type (Either TMeta ty) -> TypeM ty
+pattern TypeM a = ExceptT a
+
+unTypeM :: TypeM ty -> Type (Either TMeta ty)
+unTypeM = runExceptT
+
 
 parens :: Text -> Text
 parens a = "(" <> a <> ")"

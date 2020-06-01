@@ -23,12 +23,12 @@ import Data.Void (Void, absurd)
 import Check.Entailment (HasGlobalTheory, Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
 import Check.Kind (checkKind)
 import Check.TypeError (TypeError(..))
+import Syntax (pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
 import TCState
-  ( pattern TypeM, unTypeM
-  , emptyTCState
+  ( emptyTCState
   , freshKMeta
   , requiredConstraints
   , solveMetas_Constraint

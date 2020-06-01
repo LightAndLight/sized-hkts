@@ -17,10 +17,10 @@ import Data.Text (Text)
 
 import Check.TypeError (TypeError(..))
 import IR (Kind(..), foldKMeta)
+import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import TCState
   ( HasKindMetas, HasTypeMetas, kmetaSolutions
-  , TypeM, pattern TypeM, unTypeM
   , freshKMeta
   , getKMeta, getTMetaKind
   )

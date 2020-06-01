@@ -37,11 +37,10 @@ import Check.TypeError (TypeError)
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
-import Syntax (Type(..))
+import Syntax (Type(..), TMeta, pattern TypeM)
 import qualified Syntax
 import TCState
-  ( TMeta, pattern TypeM
-  , FilterTypes, HasKindMetas, HasTypeMetas
+  ( FilterTypes, HasKindMetas, HasTypeMetas
   , freshKMeta
   , solveKMetas
   )

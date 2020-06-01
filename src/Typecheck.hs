@@ -37,14 +37,13 @@ import Data.Void (Void, absurd)
 
 import Check.Kind (inferKind, unifyKind)
 import Check.TypeError (TypeError(..))
+import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
 import Size (sizeConstraintFor)
 import TCState
-  ( TMeta
-  , TypeM, pattern TypeM, unTypeM
-  , HasKindMetas, HasTypeMetas, HasConstraints
+  ( HasKindMetas, HasTypeMetas, HasConstraints
   , tmetaSolutions
   , getTMeta
   , freshTMeta
