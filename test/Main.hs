@@ -32,7 +32,7 @@ import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
 import qualified IR
-import Syntax (Type(..), WordSize(..))
+import Syntax (Type(..))
 import qualified Syntax
 import TCState (TMeta, emptyTCState)
 import Typecheck (sizeConstraintFor)
@@ -94,23 +94,23 @@ main =
              (TVar $ B ())
           )
     describe "entailment" $ do
-      it "simplify { (8, Sized U64) } (d0 : Sized U64) ==> [d0 := 8]" $ do
+      it "simplify { (4, Sized I32) } (d0 : Sized I32) ==> [d0 := 4]" $ do
         let
           theory :: Theory (Either TMeta Void)
           theory =
             Theory
             { _thGlobal =
-              [ (CSized $ TUInt S64, Size.Word 8)
+              [ (CSized TInt32, Size.Word 4)
               ]
             , _thLocal = mempty
             }
           e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
             m <- freshSMeta
-            (,) m <$> simplify mempty absurd absurd theory (m, CSized $ TUInt S64)
+            (,) m <$> simplify mempty absurd absurd theory (m, CSized TInt32)
         case e_res of
           Left{} -> expectationFailure "expected success, got error"
-          Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 8 :: Size (Either SMeta Void))])
-      it "solve $ simplify { (8, Sized U64), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> [d0 := 16]" $ do
+          Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 4 :: Size (Either SMeta Void))])
+      it "solve $ simplify { (4, Sized I32), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair I32)) ==> [d0 := 8]" $ do
         let
           kindScope =
             [ ("Pair", KArr KType $ KArr KType KType)
@@ -120,7 +120,7 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ (CSized $ TUInt S64, Size.Word 8)
+              [ (CSized TInt32, Size.Word 4)
               , ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
@@ -134,14 +134,14 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
+              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") TInt32)
             (assumes', sols') <- solve kindScope absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> expectationFailure $ "expected success, got error: " <> show err
           Right (d0, (assumes, sols)) ->
-            Map.lookup d0 sols `shouldBe` Just (Size.Word 16 :: Size (Either SMeta Void))
-      it "solve $ simplify { (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair U64)) ==> cannot deduce  Sized U64" $ do
+            Map.lookup d0 sols `shouldBe` Just (Size.Word 8 :: Size (Either SMeta Void))
+      it "solve $ simplify { (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair I32)) ==> cannot deduce  Sized I32" $ do
         let
           kindScope =
             [ ("Pair", KArr KType $ KArr KType KType)
@@ -164,11 +164,11 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") (TUInt S64))
+              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") TInt32)
             (assumes', sols') <- solve kindScope absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
-          Left err -> err `shouldBe` CouldNotDeduce (CSized $ TUInt S64)
+          Left err -> err `shouldBe` CouldNotDeduce (CSized TInt32)
           Right{} -> expectationFailure "expected failure, got success"
       it "solve $ simplify { (\\x -> x + x, forall x. Sized x => Sized (Pair x)) } (d0 : forall a. Sized (Pair a) => Sized a) ==> cannot deduce   Sized a" $ do
         let
@@ -230,7 +230,7 @@ main =
             { Syntax.funcName = "five"
             , Syntax.funcTyArgs = []
             , Syntax.funcArgs = []
-            , Syntax.funcRetTy = TInt S32
+            , Syntax.funcRetTy = TInt32
             , Syntax.funcBody = Syntax.Number 5
             }
           output =
@@ -239,7 +239,7 @@ main =
             , IR.funcTyArgs = []
             , IR.funcConstraints = []
             , IR.funcArgs = []
-            , IR.funcRetTy = TInt S32
+            , IR.funcRetTy = TInt32
             , IR.funcBody = IR.Int32 5
             }
         evalStateT
@@ -390,7 +390,7 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcRetTy = TInt32
               , Syntax.funcBody = Syntax.Number 0
               }
             ]
@@ -420,7 +420,7 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcRetTy = TInt32
               , Syntax.funcBody =
                   Syntax.Call (Syntax.Name "id") [Syntax.Number 0]
               }
@@ -448,7 +448,7 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcRetTy = TInt32
               , Syntax.funcBody =
                   Syntax.Let
                     [("x", Syntax.New $ Syntax.Number 26)]
@@ -487,7 +487,7 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcRetTy = TInt32
               , Syntax.funcBody =
                   Syntax.Let
                     [ ( "x"
@@ -545,7 +545,7 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt S32
+              , Syntax.funcRetTy = TInt32
               , Syntax.funcBody =
                   Syntax.Let
                     [ ( "x"

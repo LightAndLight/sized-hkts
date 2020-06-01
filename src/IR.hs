@@ -18,8 +18,8 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
-import Data.Word (Word8, Word16, Word32, Word64)
-import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Word (Word64)
+import Data.Int (Int32)
 import qualified Data.Text.Read as Text (decimal)
 
 import Syntax (Type(..))
@@ -44,15 +44,7 @@ data Expr ty tm
   | Ctor Text (Vector (Type ty))
   | Call (Expr ty tm) (Vector (Expr ty tm)) (Type ty)
 
-  | UInt8 Word8
-  | UInt16 Word16
-  | UInt32 Word32
-  | UInt64 Word64
-
-  | Int8 Int8
-  | Int16 Int16
   | Int32 Int32
-  | Int64 Int64
 
   | BTrue
   | BFalse
@@ -82,14 +74,7 @@ bindType_Expr f e =
     Ctor n ts -> Ctor n ((>>= f) <$> ts)
     Call a bs t ->
       Call (bindType_Expr f a) (bindType_Expr f <$> bs) (t >>= f)
-    UInt8 ws -> UInt8 ws
-    UInt16 ws -> UInt16 ws
-    UInt32 ws -> UInt32 ws
-    UInt64 ws -> UInt64 ws
-    Int8 ws -> Int8 ws
-    Int16 ws -> Int16 ws
     Int32 ws -> Int32 ws
-    Int64 ws -> Int64 ws
     BTrue -> BTrue
     BFalse -> BFalse
     New a t -> New (bindType_Expr f a) (t >>= f)

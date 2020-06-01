@@ -29,14 +29,7 @@ data CType
   = Ptr CType
   | FunPtr CType (Vector CType)
   | Void (Maybe Ann)
-  | Uint8
-  | Uint16
-  | Uint32
-  | Uint64
-  | Int8
-  | Int16
   | Int32
-  | Int64
   | Bool
   | Name Text
   | Struct (Vector (CType, Text))
@@ -142,14 +135,7 @@ prettyCType t =
     FunPtr ret args -> "(" <> prettyCType ret <> ")*(" <> intersperseMap ", " prettyCType args <> ")"
     Void m_ann  ->
       "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
-    Uint8 -> "uint8_t"
-    Uint16 -> "uint16_t"
-    Uint32 -> "uint32_t"
-    Uint64 -> "uint64_t"
-    Int8 -> "int8_t"
-    Int16 -> "int16_t"
     Int32 -> "int32_t"
-    Int64 -> "int64_t"
     Bool -> "bool"
     Name n -> n
     Struct fs ->

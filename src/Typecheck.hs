@@ -24,7 +24,7 @@ import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldlM, foldl', traverse_)
-import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Int (Int32)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
@@ -34,7 +34,6 @@ import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
-import Data.Word (Word8, Word16, Word32, Word64)
 
 import Check.Kind (inferKind, unifyKind)
 import Check.TypeError (TypeError(..))
@@ -100,15 +99,10 @@ unifyType kindScope tyNames kinds expected actual = do
           unifyType kindScope tyNames kinds (TypeM a) (TypeM a')
           unifyType kindScope tyNames kinds (TypeM b) (TypeM b')
         _ -> throwError $ typeMismatch tyNames expected actual
-    Syntax.TUInt sz ->
+    Syntax.TInt32 ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
-        Syntax.TUInt sz' | sz == sz' -> pure mempty
-        _ -> throwError $ typeMismatch tyNames expected actual
-    Syntax.TInt sz ->
-      case unTypeM actual of
-        Syntax.TVar (Left m) -> solveRight expected m
-        Syntax.TInt sz' | sz == sz' -> pure mempty
+        Syntax.TInt32 -> pure mempty
         _ -> throwError $ typeMismatch tyNames expected actual
     Syntax.TBool ->
       case unTypeM actual of
@@ -243,6 +237,16 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
             , irType = ty
             }
 
+    Syntax.Number n -> do
+      if 0 <= n && n <= fromIntegral (maxBound::Int32)
+      then
+        pure $
+        InferResult
+        { irExpr = IR.Int32 (fromIntegral n)
+        , irType = TypeM Syntax.TInt32
+        }
+      else throwError $ OutOfBoundsInt32 n
+
     Syntax.Let bindings body -> do
       (letScope', bindings') <-
         foldlM
@@ -288,8 +292,6 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         { irExpr = IR.Call (irExpr funResult) args' retTy
         , irType = TypeM retTy
         }
-
-    Syntax.Number{} -> throwError $ Can'tInfer (tmNames <$> expr)
 
     Syntax.BTrue ->
       pure $
@@ -374,92 +376,6 @@ checkExpr ::
   m (CheckResult ty tm)
 checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty =
   case expr of
-    Syntax.Number n -> do
-      case unTypeM ty of
-        Syntax.TVar (Left m) -> do
-          m_ty' <- getTMeta m
-          case m_ty' of
-            Nothing -> throwError $ NotNumeric (tyNames <$> ty)
-            Just ty' ->
-              checkExpr
-                kindScope
-                tyScope
-                letScope
-                tyNames
-                tmNames
-                kinds
-                types
-                expr
-                ty'
-        Syntax.TUInt sz ->
-          case sz of
-            Syntax.S8 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Word8)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.UInt8 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsUnsigned sz n
-            Syntax.S16 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Word16)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.UInt16 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsUnsigned sz n
-            Syntax.S32 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Word32)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.UInt32 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsUnsigned sz n
-            Syntax.S64 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Word64)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.UInt64 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsUnsigned sz n
-        Syntax.TInt sz ->
-          case sz of
-            Syntax.S8 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Int8)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.Int8 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsSigned sz n
-            Syntax.S16 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Int16)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.Int16 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsSigned sz n
-            Syntax.S32 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Int32)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.Int32 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsSigned sz n
-            Syntax.S64 ->
-              if 0 <= n && n <= fromIntegral (maxBound::Int64)
-              then
-                pure $
-                CheckResult
-                { crExpr = IR.Int64 (fromIntegral n)
-                }
-              else throwError $ OutOfBoundsUnsigned sz n
-        _ -> throwError $ NotNumeric (tyNames <$> ty)
     Syntax.New a -> do
       aTy <- Syntax.TVar . Left <$> freshTMeta KType
       let expected = Syntax.TApp Syntax.TPtr aTy
@@ -587,14 +503,7 @@ zonkExprTypes e =
       zonkExprTypes f <*>
       traverse zonkExprTypes args <*>
       traverse (either (error . ("zonking found: " <>) . show) pure) t
-    IR.UInt8 n -> pure $ IR.UInt8 n
-    IR.UInt16 n -> pure $ IR.UInt16 n
-    IR.UInt32 n -> pure $ IR.UInt32 n
-    IR.UInt64 n -> pure $ IR.UInt64 n
-    IR.Int8 n -> pure $ IR.Int8 n
-    IR.Int16 n -> pure $ IR.Int16 n
     IR.Int32 n -> pure $ IR.Int32 n
-    IR.Int64 n -> pure $ IR.Int64 n
     IR.BTrue -> pure $ IR.BTrue
     IR.BFalse -> pure $ IR.BFalse
     IR.New a t ->

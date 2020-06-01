@@ -206,8 +206,7 @@ solveTMetas_Type d = go d
                 (go depth . unTypeM . fmap depth)
             Right x -> pure $ TVar $ Right x
         TApp a b -> TApp <$> go depth a <*> go depth b
-        TUInt sz -> pure $ TUInt sz
-        TInt sz -> pure $ TInt sz
+        TInt32 -> pure TInt32
         TBool -> pure TBool
         TPtr -> pure TPtr
         TFun ts -> TFun <$> traverse (go depth) ts
@@ -308,14 +307,7 @@ solveTMetas_Expr = go
           go f <*>
           traverse go args <*>
           solveTMetas_Type id t
-        IR.UInt8 n -> pure $ IR.UInt8 n
-        IR.UInt16 n -> pure $ IR.UInt16 n
-        IR.UInt32 n -> pure $ IR.UInt32 n
-        IR.UInt64 n -> pure $ IR.UInt64 n
-        IR.Int8 n -> pure $ IR.Int8 n
-        IR.Int16 n -> pure $ IR.Int16 n
         IR.Int32 n -> pure $ IR.Int32 n
-        IR.Int64 n -> pure $ IR.Int64 n
         IR.BTrue -> pure $ IR.BTrue
         IR.BFalse -> pure $ IR.BFalse
         IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t

@@ -102,8 +102,7 @@ inferKind kindScope kinds ty =
       let expected = KArr bK (KVar meta)
       unifyKind expected aK
       pure $ KVar meta
-    Syntax.TUInt{} -> pure KType
-    Syntax.TInt{} -> pure KType
+    Syntax.TInt32 -> pure KType
     Syntax.TBool -> pure KType
     Syntax.TPtr -> pure $ KArr KType KType
     Syntax.TFun{} -> pure $ KArr KType KType

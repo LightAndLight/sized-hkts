@@ -86,8 +86,7 @@ typeSuffix ts =
       case ty of
         Syntax.TVar a -> absurd a
         Syntax.TApp t1 t2 -> "TApp" <> doTy t1 <> doTy t2
-        Syntax.TUInt ws -> "TUInt" <> Text.pack (show $ 8 * Syntax.wordSize ws)
-        Syntax.TInt ws -> "TInt" <> Text.pack (show $ 8 * Syntax.wordSize ws)
+        Syntax.TInt32 -> "TInt32"
         Syntax.TBool -> "TBool"
         Syntax.TPtr -> "TPtr"
         Syntax.TFun args -> "TFun" <> foldMap doTy args
@@ -106,18 +105,7 @@ genType ty =
         traverse genType args
       Syntax.TPtr | [ret] <- ts ->
         C.Ptr <$> genType ret
-      Syntax.TUInt ws ->
-        case ws of
-          Syntax.S8 -> pure C.Uint8
-          Syntax.S16 -> pure C.Uint16
-          Syntax.S32 -> pure C.Uint32
-          Syntax.S64 -> pure C.Uint64
-      Syntax.TInt ws ->
-        case ws of
-          Syntax.S8 -> pure C.Int8
-          Syntax.S16 -> pure C.Int16
-          Syntax.S32 -> pure C.Int32
-          Syntax.S64 -> pure C.Int64
+      Syntax.TInt32 -> pure C.Int32
       Syntax.TBool -> pure C.Bool
       Syntax.TName name -> do
         let key = (IR.ODatatype, name, ts)
@@ -317,14 +305,7 @@ genExpr vars expr =
       a' <- genExpr vars a
       bs' <- traverse (genExpr vars) bs
       pure $ C.Call a' bs'
-    IR.UInt8 n -> pure . C.Number $ fromIntegral n
-    IR.UInt16 n -> pure . C.Number $ fromIntegral n
-    IR.UInt32 n -> pure . C.Number $ fromIntegral n
-    IR.UInt64 n -> pure . C.Number $ fromIntegral n
-    IR.Int8 n -> pure . C.Number $ fromIntegral n
-    IR.Int16 n -> pure . C.Number $ fromIntegral n
     IR.Int32 n -> pure . C.Number $ fromIntegral n
-    IR.Int64 n -> pure . C.Number $ fromIntegral n
     IR.BTrue -> pure C.BTrue
     IR.BFalse -> pure C.BFalse
     IR.New a t -> do

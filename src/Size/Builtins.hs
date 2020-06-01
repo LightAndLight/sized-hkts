@@ -2,8 +2,7 @@ module Size.Builtins
   ( builtins
   , ptrSize
   , boolSize
-  , uintSizes
-  , intSizes
+  , int32Size
   )
 where
 
@@ -13,14 +12,14 @@ import Data.Void (Void)
 import IR (Constraint(..), Kind(..))
 import Size (Size)
 import qualified Size
-import Syntax (Type(..), wordSize, wordSizes)
+import Syntax (Type(..))
 
 builtins :: [(Constraint Void, Size Void)]
 builtins =
   ptrSize :
   boolSize :
-  uintSizes <>
-  intSizes
+  int32Size :
+  []
 
 ptrSize :: (Constraint Void, Size Void)
 ptrSize =
@@ -35,20 +34,8 @@ boolSize =
   , Size.Word 1
   )
 
-uintSizes :: [(Constraint Void, Size Void)]
-uintSizes =
-  (\ws ->
-     ( CSized $ TUInt ws
-     , Size.Word $ wordSize ws
-     )
-  ) <$>
-  wordSizes
-
-intSizes :: [(Constraint Void, Size Void)]
-intSizes =
-  (\ws ->
-     ( CSized $ TInt ws
-     , Size.Word $ wordSize ws
-     )
-  ) <$>
-  wordSizes
+int32Size :: (Constraint Void, Size Void)
+int32Size =
+  ( CSized TInt32
+  , Size.Word 4
+  )

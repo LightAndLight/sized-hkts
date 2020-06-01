@@ -11,34 +11,13 @@ import Data.Foldable (fold)
 import Data.Functor.Classes (eq1, compare1, showsPrec1)
 import qualified Data.List as List
 import Data.Text (Text)
-import qualified Data.Text as Text
 import Data.Vector (Vector)
 import Data.Void (Void)
-import Data.Word (Word64)
-
-data WordSize
-  = S8
-  | S16
-  | S32
-  | S64
-  deriving (Eq, Ord, Show)
-
-wordSize :: WordSize -> Word64
-wordSize w =
-  case w of
-    S8 -> 1
-    S16 -> 2
-    S32 -> 4
-    S64 -> 8
-
-wordSizes :: [WordSize]
-wordSizes = [S8, S16, S32, S64]
 
 data Type a
   = TVar a
   | TApp (Type a) (Type a)
-  | TUInt WordSize
-  | TInt WordSize
+  | TInt32
   | TBool
   | TPtr
   | TFun (Vector (Type a))
@@ -74,8 +53,7 @@ prettyType var ty =
          TApp{} -> parens
          _ -> id
       ) (prettyType var b)
-    TUInt ws -> Text.pack $ "uint" <> show (wordSize ws)
-    TInt ws -> Text.pack $ "int" <> show (wordSize ws)
+    TInt32 -> "int32"
     TBool -> "bool"
     TPtr -> "ptr"
     TFun args ->
