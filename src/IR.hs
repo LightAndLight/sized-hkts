@@ -160,6 +160,7 @@ data Datatype
 data Fields
   = Unnamed (Vector (Type (Var Int Void)))
   | Named (Map Text (Type (Var Int Void)))
+  deriving Show
 
 makeDatatypeFields :: Datatype -> Maybe Fields
 makeDatatypeFields adt =

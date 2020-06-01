@@ -6,11 +6,11 @@
 module Compile (compile) where
 
 import Bound.Var (Var)
-import Control.Lens.Getter (view)
+import Control.Lens.Getter (use, view)
 import Control.Lens.Setter ((%=), (.~))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State (MonadState, evalState, runStateT)
-import Data.Foldable (foldl', for_)
+import Data.Foldable (foldl')
 import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -85,8 +85,10 @@ compile decls = do
               (adt, kind, axiom, size) <- checkADT kindScope name params ctors
               let ctorsDecls = IR.datatypeConstructors adt
               globalTheory %= Map.insert axiom size
-              for_ (IR.makeDatatypeFields adt) $ \fs ->
-                datatypeFields %= Map.insert name fs
+              maybe
+                (pure ())
+                (\fs -> datatypeFields %= Map.insert name fs)
+                (IR.makeDatatypeFields adt)
               (kindScope', tyScope', rest') <-
                 checkDecls
                   (Map.insert name kind kindScope)
@@ -107,7 +109,9 @@ compile decls = do
                 , IR.DData adt : foldr ((:) . IR.DCtor) rest' ctorsDecls
                 )
             Syntax.DFunc func -> do
-              func' <- checkFunction kindScope tyScope func
+              global <- use globalTheory
+              fields <- use datatypeFields
+              func' <- checkFunction global fields kindScope tyScope func
               (kindScope', tyScope', rest') <-
                 checkDecls
                   kindScope

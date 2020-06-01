@@ -221,7 +221,7 @@ main =
             , IR.funcRetTy = TVar $ B 0
             , IR.funcBody = IR.Var $ B 0
             }
-        evalStateT (checkFunction mempty mempty input) (emptyTCState @Void) `shouldBe`
+        evalStateT (checkFunction mempty mempty mempty mempty input) (emptyTCState @Void) `shouldBe`
           Right output
       it "five() -> int32" $ do
         let
@@ -243,8 +243,8 @@ main =
             , IR.funcBody = IR.Int32 5
             }
         evalStateT
-          (checkFunction mempty mempty input)
-          (emptyTCState @Void & globalTheory .~ Map.fromList Size.builtins) `shouldBe`
+          (checkFunction (Map.fromList Size.builtins) mempty mempty mempty input)
+          (emptyTCState @Void) `shouldBe`
           Right output
       it "check `struct Pair<A, B>(A, B)`" $ do
         let
@@ -560,23 +560,23 @@ main =
           pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
           output =
             C.preamble <>
-            [ C.Typedef (C.Struct [(C.Bool, "_0"), (C.Bool, "_1")]) "Pair_TBool_TBool_t"
+            [ C.Typedef (C.Struct [(C.Int32, "_0"), (C.Int32, "_1")]) "Pair_TInt32_TInt32_t"
             , C.Function
-                (C.Name "Pair_TBool_TBool_t")
-                "make_Pair_TBool_TBool"
-                [ (C.Bool, "__0")
-                , (C.Bool, "__1")
+                (C.Name "Pair_TInt32_TInt32_t")
+                "make_Pair_TInt32_TInt32"
+                [ (C.Int32, "__0")
+                , (C.Int32, "__1")
                 ]
                 [ C.Declare
-                    (C.Name "Pair_TBool_TBool_t")
+                    (C.Name "Pair_TInt32_TInt32_t")
                     "__2"
                     (C.Init [(C.Var "__0"), (C.Var "__1")])
                 , C.Return $ C.Var "__2"
                 ]
             , C.Function C.Int32 "main" []
-              [ C.Declare (C.Name "Pair_TBool_TBool_t") "x" $
+              [ C.Declare (C.Name "Pair_TInt32_TInt32_t") "x" $
                 C.Call
-                  (C.Var "make_Pair_TBool_TBool")
+                  (C.Var "make_Pair_TInt32_TInt32")
                   [C.Number 22, C.Number 33]
               , C.Return $ C.Project (C.Var "x") "_0"
               ]
