@@ -35,6 +35,13 @@ parseProjection a =
     Right (n, "") -> Numeric n
     _ -> Field a
 
+data Case ty tm
+  = Case
+  { caseCtor :: Text
+  , caseArgs :: Vector Text
+  , caseExpr :: Expr ty (Var Int tm)
+  } deriving (Functor, Foldable, Traversable)
+
 data Expr ty tm
   = Var tm
   | Name Text
@@ -53,13 +60,25 @@ data Expr ty tm
   | Deref (Expr ty tm)
 
   | Project (Expr ty tm) Projection
+  | Match (Expr ty tm) (Vector (Case ty tm))
   deriving (Functor, Foldable, Traversable)
+deriveEq2 ''Case
+deriveShow2 ''Case
+instance (Eq ty) => Eq1 (Case ty) where; liftEq = liftEq2 (==)
+instance (Show ty) => Show1 (Case ty) where; liftShowsPrec = liftShowsPrec2 showsPrec showList
+instance (Eq ty, Eq tm) => Eq (Case ty tm) where; (==) = eq1
+instance (Show ty, Show tm) => Show (Case ty tm) where; showsPrec = showsPrec1
+
 deriveEq2 ''Expr
 deriveShow2 ''Expr
 instance (Eq ty) => Eq1 (Expr ty) where; liftEq = liftEq2 (==)
 instance (Show ty) => Show1 (Expr ty) where; liftShowsPrec = liftShowsPrec2 showsPrec showList
 instance (Eq ty, Eq tm) => Eq (Expr ty tm) where; (==) = eq1
 instance (Show ty, Show tm) => Show (Expr ty tm) where; showsPrec = showsPrec1
+
+bindType_Case :: (ty -> Type ty') -> Case ty tm -> Case ty' tm
+bindType_Case f (Case name args e) =
+  Case name args (bindType_Expr f e)
 
 bindType_Expr :: (ty -> Type ty') -> Expr ty tm -> Expr ty' tm
 bindType_Expr f e =
@@ -80,6 +99,7 @@ bindType_Expr f e =
     New a t -> New (bindType_Expr f a) (t >>= f)
     Deref a -> Deref $ bindType_Expr f a
     Project a b -> Project (bindType_Expr f a) b
+    Match a bs -> Match (bindType_Expr f a) (bindType_Case f <$> bs)
 
 newtype KMeta = KMeta Int
   deriving (Eq, Ord, Show)

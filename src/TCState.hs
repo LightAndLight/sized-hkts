@@ -270,6 +270,13 @@ solveTMetas_Expr ::
   m (IR.Expr (Either TMeta ty) tm)
 solveTMetas_Expr = go
   where
+    goCase ::
+      (MonadState (s ty) m, HasTypeMetas s) =>
+      IR.Case (Either TMeta ty) tm ->
+      m (IR.Case (Either TMeta ty) tm)
+    goCase (IR.Case name args e) =
+      IR.Case name args <$> go e
+
     go ::
       (MonadState (s ty) m, HasTypeMetas s) =>
       IR.Expr (Either TMeta ty) tm ->
@@ -303,6 +310,7 @@ solveTMetas_Expr = go
         IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t
         IR.Deref a -> IR.Deref <$> go a
         IR.Project a b -> (\a' -> IR.Project a' b) <$> go a
+        IR.Match a b -> IR.Match <$> go a <*> traverse goCase b
 
 class HasDatatypeFields s where
   datatypeFields :: Lens' s (Map Text IR.Fields)

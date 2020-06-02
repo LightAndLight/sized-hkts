@@ -5,7 +5,7 @@
 module Syntax where
 
 import Bound.TH (makeBound)
-import Bound.Var (Var)
+import Bound.Var (Var(..), unvar)
 import Control.Monad (ap)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1)
@@ -101,6 +101,13 @@ data ADT
   , adtCtors :: Ctors (Var Int Void)
   } deriving Show
 
+data Case a
+  = Case
+  { caseCtor :: Text
+  , caseArgs :: Vector Text
+  , caseExpr :: Expr (Var Int a)
+  } deriving (Functor, Foldable, Traversable)
+
 data Expr a
   = Var a
   | Name Text
@@ -117,11 +124,20 @@ data Expr a
   | Deref (Expr a)
 
   | Project (Expr a) Text
+  | Match (Expr a) (Vector (Case a))
   deriving (Functor, Foldable, Traversable)
+deriveEq1 ''Case
+deriveShow1 ''Case
+instance Eq a => Eq (Case a) where; (==) = eq1
+instance Show a => Show (Case a) where; showsPrec = showsPrec1
+
 deriveEq1 ''Expr
 deriveShow1 ''Expr
 instance Eq a => Eq (Expr a) where; (==) = eq1
 instance Show a => Show (Expr a) where; showsPrec = showsPrec1
+
+bindExpr_Case :: (a -> Expr b) -> Case a -> Case b
+bindExpr_Case f (Case name args e) = Case name args (e >>= unvar (Var . B) (fmap F . f))
 
 instance Applicative Expr where; pure = Var; (<*>) = ap
 instance Monad Expr where
@@ -137,6 +153,7 @@ instance Monad Expr where
       New v -> New (v >>= f)
       Deref p -> Deref (p >>= f)
       Project a field -> Project (a >>= f) field
+      Match e cs -> Match (e >>= f) (bindExpr_Case f <$> cs)
 
 data Function
   = Function

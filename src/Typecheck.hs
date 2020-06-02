@@ -351,6 +351,43 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
                 }
         _ -> throwError $ Can'tInfer (tmNames <$> expr)
 
+    Syntax.Match a cases -> do
+      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
+      resTy <- Syntax.TVar . Left <$> freshTMeta KType
+      caseExprs <-
+        traverse_
+           (\(Syntax.Case ctorName ctorArgs body) -> do
+              unifyType
+                kindScope
+                (Right . tyNames)
+                kinds
+                (irType aResult)
+                _patternType
+              bodyResult <-
+                inferExpr
+                  kindScope
+                  tyScope
+                  letScope
+                  tyNames
+                  (unvar _ tmNames)
+                  kinds
+                  (unvar _ types)
+                  body
+              unifyType
+                kindScope
+                (Right . tyNames)
+                kinds
+                resTy
+                (irType bodyResult)
+              pure $ irExpr bodyResult
+           )
+           cases
+      pure $
+        InferResult
+        { irExpr = IR.Match (irExpr aResult) caseExprs
+        , irType = TypeM resTy
+        }
+
 data CheckResult ty tm
   = CheckResult
   { crExpr :: IR.Expr (Either TMeta ty) tm
