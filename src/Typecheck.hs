@@ -177,10 +177,29 @@ instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
         constraints
     , TypeM $
       Syntax.TApp
-        (Syntax.TFun $ fmap placeMetas . snd <$> args
-        )
+        (Syntax.TFun $ fmap placeMetas . snd <$> args)
         (placeMetas <$> retTy)
     )
+
+inferPattern ::
+  ( MonadState (s ty) m
+  , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
+  , forall x. HasDatatypeFields (s x)
+  , MonadError TypeError m
+  , Ord ty
+  ) =>
+  Map Text Kind ->
+  Map Text (TypeScheme Void) ->
+  Map Text (TypeM ty) ->
+  (ty -> Text) ->
+  (tm -> Text) ->
+  (ty -> Kind) ->
+  (tm -> TypeM ty) ->
+  Text ->
+  Vector Text ->
+  m (TypeM ty)
+inferPattern kindScope tyScope letScope tyNames tmNames kinds types ctorName argNames =
+  _
 
 inferExpr ::
   ( MonadState (s ty) m
