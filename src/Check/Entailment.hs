@@ -53,7 +53,8 @@ import TCState
   , solveMetas_Constraint
   , tcsGlobalTheory
   )
-import Typecheck (renderTyName, unifyType)
+import Typecheck (renderTyName)
+import Unify.Type (unifyType)
 
 newtype SMeta = SMeta Int
   deriving (Eq, Ord, Show)
