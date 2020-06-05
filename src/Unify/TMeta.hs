@@ -22,7 +22,7 @@ import qualified Data.Map as Map
 import IR (Kind(..))
 import qualified IR
 import Syntax (TMeta(..), TypeM, unTypeM, Type(..))
-import Unify.Kind (HasKindMetas, solveKMetas)
+import Unify.KMeta (HasKindMetas, solveKMetas)
 
 class HasTypeMetas s where
   nextTMeta :: Lens' (s ty) TMeta

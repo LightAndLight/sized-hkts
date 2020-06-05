@@ -51,7 +51,7 @@ import TCState
   , FilterTypes, filterTypes, mapTypes
   , tcsGlobalTheory
   )
-import Unify.Kind (HasKindMetas(..))
+import Unify.KMeta (HasKindMetas(..))
 import Unify.TMeta (HasTypeMetas(..), freshTMeta, solveMetas_Constraint)
 import Unify.Type (unifyType)
 

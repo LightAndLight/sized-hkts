@@ -16,7 +16,8 @@ import Error.TypeError (TypeError(..))
 import IR (Kind(..))
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
-import Unify.Kind (HasKindMetas, freshKMeta, unifyKind)
+import Unify.KMeta (HasKindMetas, freshKMeta)
+import Unify.Kind (unifyKind)
 import Unify.TMeta (HasTypeMetas, getTMetaKind)
 
 checkKind ::

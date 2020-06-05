@@ -41,7 +41,7 @@ import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
 import Size (Size)
 import Syntax (TMeta(..), Type(..), TypeM)
-import Unify.Kind (HasKindMetas(..))
+import Unify.KMeta (HasKindMetas(..))
 import Unify.TMeta (HasTypeMetas(..))
 
 data TCState ty

@@ -39,7 +39,7 @@ import TCState
   , requiredConstraints
   , HasDatatypeFields, getFieldType
   )
-import Unify.Kind (HasKindMetas)
+import Unify.KMeta (HasKindMetas)
 import Unify.TMeta (HasTypeMetas, freshTMeta, solveTMetas_Type)
 import Unify.Type (unifyType)
 

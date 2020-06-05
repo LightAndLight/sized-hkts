@@ -16,7 +16,8 @@ import Error.TypeError (TypeError(..), typeMismatch, renderTyName)
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..))
-import Unify.Kind (HasKindMetas, unifyKind)
+import Unify.KMeta (HasKindMetas)
+import Unify.Kind (unifyKind)
 import Unify.TMeta (HasTypeMetas, getTMeta, tmetaSolutions)
 
 unifyType ::

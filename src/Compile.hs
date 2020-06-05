@@ -28,7 +28,7 @@ import qualified IR
 import TCState (FilterTypes, HasDatatypeFields, emptyTCState, datatypeFields)
 import qualified Size.Builtins as Size
 import qualified Syntax
-import Unify.Kind (HasKindMetas)
+import Unify.KMeta (HasKindMetas)
 import Unify.TMeta (HasTypeMetas)
 
 compile ::

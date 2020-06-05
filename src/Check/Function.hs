@@ -34,7 +34,7 @@ import TCState
   , datatypeFields
   , requiredConstraints
   )
-import Unify.Kind (freshKMeta, solveKMetas)
+import Unify.KMeta (freshKMeta, solveKMetas)
 import Unify.TMeta (solveMetas_Constraint, solveTMetas_Expr)
 
 checkFunction ::

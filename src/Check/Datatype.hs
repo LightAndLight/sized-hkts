@@ -40,7 +40,8 @@ import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
 import Syntax (Type(..), TMeta, pattern TypeM)
 import qualified Syntax
 import TCState (FilterTypes)
-import Unify.Kind (HasKindMetas, freshKMeta, solveKMetas, unifyKind)
+import Unify.KMeta (HasKindMetas, freshKMeta, solveKMetas)
+import Unify.Kind (unifyKind)
 import Unify.TMeta (HasTypeMetas)
 
 makeSizeTerm ::
