@@ -4,7 +4,7 @@
 {-# language FunctionalDependencies, MultiParamTypeClasses, TypeFamilies #-}
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
-module TCState
+module Check.TCState
   ( TCState
   , emptyTCState
   , tcsKindMeta
@@ -15,7 +15,6 @@ module TCState
   , tcsConstraints
   , tcsGlobalTheory
   , HasConstraints(..)
-  , FilterTypes(..), mapTypes
   , HasDatatypeFields(..)
   , getFieldType
   )
@@ -36,6 +35,8 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
 
+import Check.Entailment (HasGlobalTheory(..), HasSizeMetas(..), SMeta(..))
+import Check.TCState.FilterTypes (FilterTypes(..))
 import Error.TypeError (TypeError(..))
 import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
@@ -52,10 +53,17 @@ data TCState ty
   , _tcsTypeMetaKinds :: Map TMeta Kind
   , _tcsTypeSolutions :: Map TMeta (TypeM ty)
   , _tcsConstraints :: Set (Constraint (Either TMeta ty))
+  , _tcsSizeMeta :: SMeta
   , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
   , _tcsDatatypeFields :: Map Text IR.Fields
   }
 makeLenses ''TCState
+
+instance HasGlobalTheory (TCState ty) where
+  globalTheory = tcsGlobalTheory
+
+instance HasSizeMetas (TCState ty) where
+  nextSMeta  = tcsSizeMeta
 
 emptyTCState :: Ord ty => TCState ty
 emptyTCState =
@@ -68,13 +76,8 @@ emptyTCState =
   , _tcsConstraints = mempty
   , _tcsGlobalTheory = mempty
   , _tcsDatatypeFields = mempty
+  , _tcsSizeMeta = SMeta 0
   }
-
-class FilterTypes s where
-  filterTypes :: Ord ty' => (ty -> Maybe ty') -> s ty -> s ty'
-
-mapTypes :: (FilterTypes s, Ord ty') => (ty -> ty') -> s ty -> s ty'
-mapTypes f = filterTypes (Just . f)
 
 class HasConstraints s where
   requiredConstraints :: Lens' (s ty) (Set (Constraint (Either TMeta ty)))

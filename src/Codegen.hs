@@ -34,14 +34,11 @@ import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import Data.Word (Word64)
 
-import Check.Entailment
-  ( Theory(..)
-  , emptyEntailState, findSMeta, freshSMeta, solve
-  )
+import Check.Entailment (Theory(..), findSMeta, freshSMeta, solve)
+import Check.TCState (emptyTCState)
 import Codegen.C (CDecl, CExpr, CStatement, CType)
 import qualified Codegen.C as C
 import qualified IR
-import TCState (emptyTCState)
 import Size (Size)
 import qualified Size
 import qualified Syntax
@@ -273,7 +270,7 @@ sizeOfType kindScope global t =
     Right n -> n
   where
     result =
-      flip evalStateT (emptyEntailState emptyTCState) $ do
+      flip evalStateT emptyTCState $ do
         m <- freshSMeta
         (_, solutions) <-
           solve

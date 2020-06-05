@@ -18,14 +18,15 @@ import Data.Text (Text)
 import Data.Void (Void)
 
 import Check.Datatype (checkADT)
-import Check.Entailment (HasSizeMetas, HasGlobalTheory, emptyEntailState, globalTheory)
+import Check.Entailment (HasSizeMetas, HasGlobalTheory, globalTheory)
 import Check.Function (checkFunction)
+import Check.TCState (HasDatatypeFields, emptyTCState, datatypeFields)
+import Check.TCState.FilterTypes (FilterTypes)
 import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
 import qualified Codegen
 import qualified Codegen.C as C
 import Error.TypeError (TypeError)
 import qualified IR
-import TCState (FilterTypes, HasDatatypeFields, emptyTCState, datatypeFields)
 import qualified Size.Builtins as Size
 import qualified Syntax
 import Unify.KMeta (HasKindMetas)
@@ -37,7 +38,7 @@ compile ::
   m [C.CDecl]
 compile decls = do
   ((kindScope, _, decls'), entailState) <-
-    flip runStateT (emptyEntailState emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
+    flip runStateT (emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
     checkDecls mempty mempty decls
   let
     declsMap =

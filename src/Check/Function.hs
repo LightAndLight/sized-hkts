@@ -20,8 +20,13 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.Entailment (Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
+import Check.Entailment (Theory(..), freshSMeta, globalTheory, solve)
 import Check.Kind (checkKind)
+import Check.TCState
+  ( emptyTCState
+  , datatypeFields
+  , requiredConstraints
+  )
 import Check.Type (CheckResult(..), checkExpr, zonkExprTypes)
 import Error.TypeError (TypeError(..))
 import Syntax (pattern TypeM, unTypeM)
@@ -29,11 +34,6 @@ import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
 import Size (Size)
-import TCState
-  ( emptyTCState
-  , datatypeFields
-  , requiredConstraints
-  )
 import Unify.KMeta (freshKMeta, solveKMetas)
 import Unify.TMeta (solveMetas_Constraint, solveTMetas_Expr)
 
@@ -47,7 +47,7 @@ checkFunction ::
   m IR.Function
 checkFunction glbl fields kindScope tyScope (Syntax.Function name tyArgs args retTy body) = do
   (tyArgs', constraints', body') <-
-    flip evalStateT (emptyEntailState emptyTCState & globalTheory .~ glbl & datatypeFields .~ fields) $ do
+    flip evalStateT (emptyTCState & globalTheory .~ glbl & datatypeFields .~ fields) $ do
       tyArgKinds <- traverse (fmap KVar . const freshKMeta) tyArgs
       let args' = TypeM . fmap Right . snd <$> args
       let retTy' = TypeM $ Right <$> retTy

@@ -6,19 +6,15 @@
 {-# language QuantifiedConstraints #-}
 {-# options_ghc -fno-warn-unused-top-binds #-}
 module Check.Entailment
-  ( SMeta(..), composeSSubs
+  ( solve
+  , entails
+  , simplify
+  , SMeta(..), composeSSubs
   , Theory(..), theoryToList, insertLocal, mapTy
   , HasGlobalTheory(..)
-  , EntailState, emptyEntailState
-  , entailTCState
-  , entailSizeMeta
-  , entailGlobalTheory
   , HasSizeMetas(..)
   , freshSMeta
   , findSMeta
-  , solve
-  , entails
-  , simplify
   )
 where
 
@@ -41,16 +37,11 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void, absurd)
 
+import Check.TCState.FilterTypes (FilterTypes, filterTypes, mapTypes)
 import Error.TypeError (TypeError(..), renderTyName)
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import Syntax (TMeta(..), TMeta, pattern TypeM)
-import TCState
-  ( TCState
-  , HasDatatypeFields(..), HasConstraints(..)
-  , FilterTypes, filterTypes, mapTypes
-  , tcsGlobalTheory
-  )
 import Unify.KMeta (HasKindMetas(..))
 import Unify.TMeta (HasTypeMetas(..), freshTMeta, solveMetas_Constraint)
 import Unify.Type (unifyType)
@@ -77,9 +68,6 @@ class HasGlobalTheory s where
 
 instance HasGlobalTheory (Theory ty) where
   globalTheory = thGlobal
-
-instance HasGlobalTheory (TCState ty) where
-  globalTheory = tcsGlobalTheory
 
 insertLocal :: Ord ty => Constraint ty -> SMeta -> Theory ty -> Theory ty
 insertLocal k v (Theory gbl lcl) = Theory gbl (Map.insert k v lcl)
@@ -110,48 +98,8 @@ composeSSubs ::
 composeSSubs a b =
   fmap (applySSubs a) b <> a
 
-data EntailState tc ty
-  = EntailState
-  { _entailTCState :: tc ty
-  , _entailSizeMeta :: SMeta
-  , _entailGlobalTheory :: Map (Constraint Void) (Size Void)
-  }
-makeLenses ''EntailState
-
-instance HasGlobalTheory (tc ty) => HasGlobalTheory (EntailState tc ty) where
-  globalTheory = entailGlobalTheory
-
-instance HasConstraints tc => HasConstraints (EntailState tc) where
-  requiredConstraints = entailTCState.requiredConstraints
-
-instance FilterTypes tc => FilterTypes (EntailState tc) where
-  filterTypes f es = es { _entailTCState = filterTypes f $ _entailTCState es }
-
 class HasSizeMetas s where
   nextSMeta :: Lens' s SMeta
-
-instance HasTypeMetas tc => HasTypeMetas (EntailState tc) where
-  nextTMeta = entailTCState.nextTMeta
-  tmetaKinds = entailTCState.tmetaKinds
-  tmetaSolutions = entailTCState.tmetaSolutions
-
-instance HasKindMetas (tc ty) => HasKindMetas (EntailState tc ty) where
-  nextKMeta = entailTCState.nextKMeta
-  kmetaSolutions = entailTCState.kmetaSolutions
-
-instance HasSizeMetas (EntailState tc ty) where
-  nextSMeta = entailSizeMeta
-
-instance HasDatatypeFields (tc ty) => HasDatatypeFields (EntailState tc ty) where
-  datatypeFields = entailTCState.datatypeFields
-
-emptyEntailState :: tc ty -> EntailState tc ty
-emptyEntailState tc =
-  EntailState
-  { _entailTCState = tc
-  , _entailSizeMeta = SMeta 0
-  , _entailGlobalTheory = mempty
-  }
 
 freshSMeta :: (MonadState s m, HasSizeMetas s) => m SMeta
 freshSMeta = do

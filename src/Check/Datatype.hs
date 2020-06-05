@@ -33,13 +33,13 @@ import Check.Entailment
   , solve
   )
 import Check.Kind (checkKind)
+import Check.TCState.FilterTypes (FilterTypes)
 import Error.TypeError (TypeError)
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
 import Syntax (Type(..), TMeta, pattern TypeM)
 import qualified Syntax
-import TCState (FilterTypes)
 import Unify.KMeta (HasKindMetas, freshKMeta, solveKMetas)
 import Unify.Kind (unifyKind)
 import Unify.TMeta (HasTypeMetas)

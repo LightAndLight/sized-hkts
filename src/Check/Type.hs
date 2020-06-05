@@ -29,16 +29,16 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
+import Check.TCState
+  ( HasConstraints
+  , requiredConstraints
+  , HasDatatypeFields, getFieldType
+  )
 import Error.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
-import TCState
-  ( HasConstraints
-  , requiredConstraints
-  , HasDatatypeFields, getFieldType
-  )
 import Unify.KMeta (HasKindMetas)
 import Unify.TMeta (HasTypeMetas, freshTMeta, solveTMetas_Type)
 import Unify.Type (unifyType)

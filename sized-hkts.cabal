@@ -21,6 +21,8 @@ library
                      , Check.Entailment
                      , Check.Function
                      , Check.Kind
+                     , Check.TCState
+                     , Check.TCState.FilterTypes
                      , Check.Type
                      , Codegen
                      , Codegen.C
@@ -30,7 +32,6 @@ library
                      , Size
                      , Size.Builtins
                      , Syntax
-                     , TCState
                      , Unify.KMeta
                      , Unify.Kind
                      , Unify.TMeta

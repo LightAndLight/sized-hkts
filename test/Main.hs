@@ -20,10 +20,11 @@ import Check.Datatype (checkADT)
 import Check.Entailment
   ( SMeta(..), Theory(..)
   , composeSSubs
-  , emptyEntailState, globalTheory
+  , globalTheory
   , freshSMeta, simplify, solve
   )
 import Check.Function (checkFunction)
+import Check.TCState (emptyTCState)
 import qualified Codegen.C as C
 import qualified Compile
 import Error.TypeError (TypeError(..))
@@ -34,7 +35,6 @@ import IR (Constraint(..), Kind(..))
 import qualified IR
 import Syntax (Type(..), TMeta)
 import qualified Syntax
-import TCState (emptyTCState)
 
 main :: IO ()
 main =
@@ -103,7 +103,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
+          e_res = flip evalState emptyTCState . runExceptT $ do
             m <- freshSMeta
             (,) m <$> simplify mempty absurd absurd theory (m, CSized TInt32)
         case e_res of
@@ -129,7 +129,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
+          e_res = flip evalState (emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -159,7 +159,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
+          e_res = flip evalState (emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -184,7 +184,7 @@ main =
               ]
             , _thLocal = mempty
             }
-          e_res = flip evalState (emptyEntailState emptyTCState) . runExceptT $ do
+          e_res = flip evalState (emptyTCState) . runExceptT $ do
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
@@ -248,7 +248,7 @@ main =
       it "check `struct Pair<A, B>(A, B)`" $ do
         let
           result =
-            flip evalStateT (emptyEntailState emptyTCState) $
+            flip evalStateT (emptyTCState) $
             checkADT
               mempty
               "Pair"
@@ -277,7 +277,7 @@ main =
       it "check `struct Pair<F, A, B>(F<A>, F<B>)`" $ do
         let
           result =
-            flip evalStateT (emptyEntailState emptyTCState) $
+            flip evalStateT (emptyTCState) $
             checkADT
               mempty
               "Pair"
@@ -325,7 +325,7 @@ main =
       it "check `struct Sum<A, B>{ Left(A), Right(B) }`" $ do
         let
           result =
-            flip evalStateT (emptyEntailState emptyTCState) $
+            flip evalStateT (emptyTCState) $
             checkADT
               mempty
               "Sum"
@@ -357,7 +357,7 @@ main =
       it "check `struct Box<A>(Ptr<A>)`" $ do
         let
           result =
-            flip evalStateT (emptyEntailState emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
+            flip evalStateT (emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
             checkADT
               mempty
               "Box"
