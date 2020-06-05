@@ -457,10 +457,10 @@ main =
           output =
             C.preamble <>
             [ C.Function C.Int32 "main" []
-              [ C.Declare (C.Ptr C.Int32) "__0" $
+              [ C.Declare (C.Ptr C.Int32) "__0" . Just $
                 C.Cast (C.Ptr C.Int32) (C.Malloc $ C.Number 4)
               , C.Assign (C.Deref $ C.Var "__0") (C.Number 26)
-              , C.Declare (C.Ptr C.Int32) "x" (C.Var "__0")
+              , C.Declare (C.Ptr C.Int32) "x" (Just $ C.Var "__0")
               , C.Return . C.Deref $ C.Var "x"
               ]
             ]
@@ -512,11 +512,11 @@ main =
                 [ C.Declare
                     (C.Name "Pair_TBool_TBool_t")
                     "__2"
-                    (C.Init [(C.Var "__0"), (C.Var "__1")])
+                    (Just $ C.Init [(C.Var "__0"), (C.Var "__1")])
                 , C.Return $ C.Var "__2"
                 ]
             , C.Function C.Int32 "main" []
-              [ C.Declare (C.Name "Pair_TBool_TBool_t") "x" $
+              [ C.Declare (C.Name "Pair_TBool_TBool_t") "x" . Just $
                 C.Call
                   (C.Var "make_Pair_TBool_TBool")
                   [C.BTrue, C.BFalse]
@@ -570,11 +570,11 @@ main =
                 [ C.Declare
                     (C.Name "Pair_TInt32_TInt32_t")
                     "__2"
-                    (C.Init [(C.Var "__0"), (C.Var "__1")])
+                    (Just $ C.Init [(C.Var "__0"), (C.Var "__1")])
                 , C.Return $ C.Var "__2"
                 ]
             , C.Function C.Int32 "main" []
-              [ C.Declare (C.Name "Pair_TInt32_TInt32_t") "x" $
+              [ C.Declare (C.Name "Pair_TInt32_TInt32_t") "x" . Just $
                 C.Call
                   (C.Var "make_Pair_TInt32_TInt32")
                   [C.Number 22, C.Number 33]
@@ -624,12 +624,12 @@ main =
                 )
               ]
             , C.Function (C.Name "List_TInt32_t") "make_Nil_TInt32" []
-              [ C.Declare (C.Name "List_TInt32_t") "__0" $
+              [ C.Declare (C.Name "List_TInt32_t") "__0" . Just $
                 C.Init [C.Number 0, C.InitNamed [("Nil", C.Init [])]]
               , C.Return (C.Var "__0")
               ]
             , C.Function C.Int32 "main" []
-              [ C.Declare (C.Name "List_TInt32_t") "x" $
+              [ C.Declare (C.Name "List_TInt32_t") "x" . Just $
                 C.Call (C.Var "make_Nil_TInt32") []
               , C.Return $ C.Number 0
               ]
@@ -639,4 +639,91 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code -> do
+            code `shouldBe` output
+      it "7" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "List"
+              , Syntax.adtArgs = ["A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Nil" [] $
+                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt32
+              , Syntax.funcBody =
+                  let
+                    e =
+                      Syntax.Call
+                        (Syntax.Name "Cons")
+                        [ Syntax.Number 1
+                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                        ]
+                  in
+                    Syntax.Match e
+                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
+                      , Syntax.Case "Cons" ["a", "b"] $
+                        Syntax.Var (B 0)
+                      ]
+              }
+            ]
+          output =
+            C.preamble <>
+            [ C.Typedef (C.Name "struct List_TInt32_t") "List_TInt32_t"
+            , C.Struct "List_TInt32_t"
+              [ (C.UInt8, "tag")
+              , ( C.Union
+                  [ (C.TStruct [],"Nil")
+                  , (C.TStruct [(C.Int32,"_0"), (C.Ptr (C.Name "List_TInt32_t"),"_1")],"Cons")
+                  ]
+                , "data"
+                )
+              ]
+            , C.Function
+                (C.Name "List_TInt32_t")
+                "make_Cons_TInt32"
+                [(C.Int32, "__0"), (C.Ptr $ C.Name "List_TInt32_t", "__1")]
+                [ C.Declare (C.Name "List_TInt32_t") "__2" . Just $
+                  C.Init [C.Number 1, C.InitNamed [("Cons", C.Init [C.Var "__0", C.Var "__1"])]]
+                , C.Return (C.Var "__2")
+                ]
+            , C.Function (C.Name "List_TInt32_t") "make_Nil_TInt32" []
+              [ C.Declare (C.Name "List_TInt32_t") "__3" . Just $
+                C.Init [C.Number 0, C.InitNamed [("Nil", C.Init [])]]
+              , C.Return (C.Var "__3")
+              ]
+            , C.Function C.Int32 "main" []
+              [ C.Declare (C.Ptr $ C.Name "List_TInt32_t") "__4" . Just $
+                C.Cast (C.Ptr $ C.Name "List_TInt32_t") (C.Malloc $ C.Number 13)
+              , C.Assign (C.Deref (C.Var "__4")) $ C.Call (C.Var "make_Nil_TInt32") []
+
+              , C.Declare (C.Name "List_TInt32_t") "__5" . Just $
+                C.Call (C.Var "make_Cons_TInt32") [C.Number 1, C.Var "__4"]
+
+              , C.Declare C.Int32 "__6" Nothing
+
+              , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 0))
+                [ C.Assign (C.Var "__6") (C.Number 0)
+                ]
+
+              , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 1))
+                [ C.Assign (C.Var "__6") (C.Project (C.Project (C.Project (C.Var "__5") "data") "Cons") "_0")
+                ]
+
+              , C.Return $ C.Var "__6"
+              ]
+            ]
+        case Compile.compile input of
+          Left err ->
+            expectationFailure $
+            "Expected success, got " <> show err
+          Right code -> do
+            Text.putStrLn $ C.prettyCDecls code
             code `shouldBe` output

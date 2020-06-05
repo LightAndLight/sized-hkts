@@ -8,6 +8,7 @@ module Codegen
   ( Code
   , emptyCode
   , codeKinds
+  , codeDatatypeCtors
   , codeDeclarations
   , codeGlobalTheory
   , genFunction
@@ -48,10 +49,11 @@ data Code
   { _codeKinds :: Map Text IR.Kind
   , _codeDeclarations :: Map (IR.Origin, Text) IR.Declaration
   , _codeGlobalTheory :: Map (IR.Constraint Void) (Size Void)
+  , _codeDatatypeCtors :: Map Text IR.Constructor
   , _codeCompiledNames ::
       Map
         (IR.Origin, Text, Vector (Syntax.Type Void))
-        (Text, Maybe [CDecl]) -- Nothing indicates that this code is currently being compiled
+        (Text, Maybe [CDecl]) -- 'Nothing' indicates that this code is currently being compiled
   , _codeSupply :: Int
   }
 makeLenses ''Code
@@ -62,6 +64,7 @@ emptyCode =
   { _codeKinds = mempty
   , _codeDeclarations = mempty
   , _codeGlobalTheory = mempty
+  , _codeDatatypeCtors = mempty
   , _codeCompiledNames = mempty
   , _codeSupply = 0
   }
@@ -286,12 +289,12 @@ sizeOfType kindScope global t =
 genExpr ::
   forall m tm.
   (MonadState Code m) =>
-  (tm -> Text) ->
+  (tm -> CExpr) ->
   IR.Expr Void tm ->
   WriterT [CStatement] m CExpr
 genExpr vars expr =
   case expr of
-    IR.Var a -> pure $ C.Var (vars a)
+    IR.Var a -> pure $ vars a
     IR.Name n -> pure $ C.Var n
     IR.Let es b -> do
       genBindings es
@@ -305,7 +308,7 @@ genExpr vars expr =
             (\((bname, bval), bty) -> do
                bval' <- genExpr vars bval
                bty' <- genType bty
-               tell [C.Declare bty' bname bval']
+               tell [C.Declare bty' bname $ Just bval']
             )
     IR.Inst n ts -> genInst n ts
     IR.Ctor n ts -> genCtor n ts
@@ -325,7 +328,7 @@ genExpr vars expr =
       pt <- C.Ptr <$> genType t
       n1 <- freshName
       tell
-        [ C.Declare pt n1 . C.Cast pt $
+        [ C.Declare pt n1 . Just . C.Cast pt $
           C.Malloc (C.Number $ fromIntegral size)
         , C.Assign (C.Deref $ C.Var n1) a'
         ]
@@ -338,7 +341,47 @@ genExpr vars expr =
           pure $ C.Project a' (Text.pack $ '_' : show ix)
         IR.Field n ->
           pure $ C.Project a' n
-    IR.Match a b -> error "TODO" a b
+    IR.Match a inTy bs resTy -> do
+      a' <- genExpr vars a
+
+      varName <- freshName
+      inTy' <- genType inTy
+      tell [C.Declare inTy' varName $ Just a']
+
+      resName <- freshName
+      resTy' <- genType resTy
+      tell [C.Declare resTy' resName Nothing]
+      traverse_
+        (\(IR.Case ctorName _ caseExpr) -> do
+          m_ctor <- uses codeDatatypeCtors $ Map.lookup ctorName
+          case m_ctor of
+            Nothing -> error $ "genExpr: missing ctor " <> show ctorName
+            Just ctor ->
+              case IR.ctorSort ctor of
+                IR.EnumCtor tag -> do
+                  (caseExpr', caseExprSts) <-
+                    runWriterT $
+                    genExpr
+                      (unvar
+                         (\ix ->
+                            C.Project
+                              (C.Project (C.Project (C.Var varName) "data") ctorName)
+                              (Text.pack $ "_" <> show ix)
+                         )
+                         vars
+                      )
+                      caseExpr
+                  tell
+                    [ C.If
+                        (C.Eq (C.Project (C.Var varName) "tag") (C.Number $ fromIntegral tag))
+                        (caseExprSts <>
+                         [C.Assign (C.Var resName) caseExpr']
+                        )
+                    ]
+                IR.StructCtor -> error "genExpr: matching on struct"
+        )
+        bs
+      pure $ C.Var resName
 
 genConstructor ::
   (MonadState Code m) =>
@@ -379,9 +422,9 @@ genConstructor (IR.Constructor name ctorSort tyArgs args retTy) tyArgs' =
             args_inst'
             [ case ctorSort of
                 IR.StructCtor ->
-                  C.Declare retTy_instGen destName . C.Init $ C.Var . snd <$> args_inst'
+                  C.Declare retTy_instGen destName . Just . C.Init $ C.Var . snd <$> args_inst'
                 IR.EnumCtor tag ->
-                  C.Declare retTy_instGen destName $
+                  C.Declare retTy_instGen destName . Just $
                   C.Init
                   [ C.Number $ fromIntegral tag
                   , C.InitNamed [(name, C.Init $ C.Var . snd <$> args_inst')]
@@ -416,7 +459,7 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst
           body_inst = IR.bindType_Expr inst body
-        (body', sts) <- runWriterT $ genExpr (unvar (fmap fst args Vector.!) absurd) body_inst
+        (body', sts) <- runWriterT $ genExpr (unvar (C.Var . (fmap fst args Vector.!)) absurd) body_inst
         (\retTy' args' ->
            C.Function retTy'
              (name <> typeSuffix tyArgs')

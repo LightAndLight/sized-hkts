@@ -148,4 +148,9 @@ solveTMetas_Expr = go
         IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t
         IR.Deref a -> IR.Deref <$> go a
         IR.Project a b -> (\a' -> IR.Project a' b) <$> go a
-        IR.Match a b -> IR.Match <$> go a <*> traverse goCase b
+        IR.Match a inTy b resTy ->
+          IR.Match <$>
+          go a <*>
+          solveTMetas_Type id inTy <*>
+          traverse goCase b <*>
+          solveTMetas_Type id resTy

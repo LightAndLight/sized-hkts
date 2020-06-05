@@ -52,12 +52,14 @@ data CExpr
   | Init (Vector CExpr)
   | InitNamed (Vector (Text, CExpr))
   | Project CExpr Text
+  | Eq CExpr CExpr
   deriving (Eq, Show)
 
 data CStatement
   = Return CExpr
-  | Declare CType Text CExpr
+  | Declare CType Text (Maybe CExpr)
   | Assign CExpr CExpr
+  | If CExpr [CStatement]
   deriving (Eq, Show)
 
 data CDecl
@@ -131,6 +133,10 @@ prettyCExpr e =
       )
       (prettyCExpr a) <>
       "." <> b
+    Eq a b ->
+      prettyCExpr a <>
+      " == " <>
+      prettyCExpr b
 
 prettyCType :: CType -> Text
 prettyCType t =
@@ -158,8 +164,12 @@ prettyCStatement :: CStatement -> Text
 prettyCStatement s =
   case s of
     Return e -> "return " <> prettyCExpr e
-    Declare t n e -> prettyCType t <> " " <> n <> " = " <> prettyCExpr e
+    Declare t n e -> prettyCType t <> " " <> n <> foldMap ((" = " <>) . prettyCExpr) e
     Assign l r -> prettyCExpr l <> " = " <> prettyCExpr r
+    If cond ss ->
+      "if (" <> prettyCExpr cond <> ") {\n" <>
+      foldMap (\s' -> prettyCStatement s' <> ";\n") ss <>
+      "}"
 
 prettyCDecl :: CDecl -> Text
 prettyCDecl d =

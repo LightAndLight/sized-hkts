@@ -60,7 +60,7 @@ data Expr ty tm
   | Deref (Expr ty tm)
 
   | Project (Expr ty tm) Projection
-  | Match (Expr ty tm) (Vector (Case ty tm))
+  | Match (Expr ty tm) (Type ty) (Vector (Case ty tm)) (Type ty)
   deriving (Functor, Foldable, Traversable)
 deriveEq2 ''Case
 deriveShow2 ''Case
@@ -99,7 +99,8 @@ bindType_Expr f e =
     New a t -> New (bindType_Expr f a) (t >>= f)
     Deref a -> Deref $ bindType_Expr f a
     Project a b -> Project (bindType_Expr f a) b
-    Match a bs -> Match (bindType_Expr f a) (bindType_Case f <$> bs)
+    Match a inTy bs resTy ->
+      Match (bindType_Expr f a) (inTy >>= f) (bindType_Case f <$> bs) (resTy >>= f)
 
 newtype KMeta = KMeta Int
   deriving (Eq, Ord, Show)

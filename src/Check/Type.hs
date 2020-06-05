@@ -95,18 +95,21 @@ inferPattern ::
   m (Vector (TypeM ty), TypeM ty)
 inferPattern ctorName argNames = do
   ctor <- getConstructor ctorName
-  let
-    expectedLength = length $ IR.ctorArgs ctor
-    actualLength = length argNames
-  case expectedLength == actualLength of
-    False -> throwError $ CtorArityMismatch ctorName expectedLength actualLength
-    True -> do
-      tyArgs <- traverse (\_ -> freshTMeta KType) $ IR.ctorTyArgs ctor
-      let inst = fmap $ unvar (Left . (tyArgs Vector.!)) absurd
-      pure
-        ( TypeM . inst . snd <$> IR.ctorArgs ctor
-        , TypeM . inst $ IR.ctorRetTy ctor
-        )
+  case IR.ctorSort ctor of
+    IR.StructCtor -> throwError $ MatchingOnStruct ctorName
+    IR.EnumCtor{} -> do
+      let
+        expectedLength = length $ IR.ctorArgs ctor
+        actualLength = length argNames
+      case expectedLength == actualLength of
+        False -> throwError $ CtorArityMismatch ctorName expectedLength actualLength
+        True -> do
+          tyArgs <- traverse (\_ -> freshTMeta KType) $ IR.ctorTyArgs ctor
+          let inst = fmap $ unvar (Left . (tyArgs Vector.!)) absurd
+          pure
+            ( TypeM . inst . snd <$> IR.ctorArgs ctor
+            , TypeM . inst $ IR.ctorRetTy ctor
+            )
 
 inferExpr ::
   ( MonadState (s ty) m
@@ -311,7 +314,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
            cases
       pure $
         InferResult
-        { irExpr = IR.Match (irExpr aResult) caseExprs
+        { irExpr = IR.Match (irExpr aResult) (unTypeM $ irType aResult) caseExprs resTy
         , irType = TypeM resTy
         }
 
@@ -394,7 +397,9 @@ zonkExprTypes e =
         t
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
     IR.Project a b -> (\a' -> IR.Project a' b) <$> zonkExprTypes a
-    IR.Match a bs ->
+    IR.Match a inTy bs resTy ->
       IR.Match <$>
       zonkExprTypes a <*>
-      traverse zonkCaseTypes bs
+      traverse (either (error . ("zonking found: " <>) . show) pure) inTy <*>
+      traverse zonkCaseTypes bs <*>
+      traverse (either (error . ("zonking found: " <>) . show) pure) resTy

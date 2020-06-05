@@ -7,7 +7,7 @@ module Compile (compile) where
 
 import Bound.Var (Var)
 import Control.Lens.Getter (use, view)
-import Control.Lens.Setter ((%=), (.~))
+import Control.Lens.Setter ((%=), (.~), (<>=))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State (MonadState, evalState, runStateT)
 import Data.Foldable (foldl')
@@ -22,7 +22,7 @@ import Check.Entailment (HasSizeMetas, HasGlobalTheory, globalTheory)
 import Check.Function (checkFunction)
 import Check.TCState (emptyTCState)
 import Check.TCState.FilterTypes (FilterTypes)
-import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
+import Codegen (codeKinds, codeDatatypeCtors, codeDeclarations, codeGlobalTheory)
 import qualified Codegen
 import qualified Codegen.C as C
 import Error.TypeError (TypeError)
@@ -37,7 +37,7 @@ compile ::
   [Syntax.Declaration] ->
   m [C.CDecl]
 compile decls = do
-  ((kindScope, _, decls'), entailState) <-
+  ((kindScope, _, decls'), tcState) <-
     flip runStateT (emptyTCState & globalTheory .~ Map.fromList Size.builtins) $
     checkDecls mempty mempty decls
   let
@@ -50,7 +50,8 @@ compile decls = do
       Codegen.emptyCode &
         codeKinds .~ kindScope &
         codeDeclarations .~ declsMap &
-        codeGlobalTheory .~ view globalTheory entailState
+        codeGlobalTheory .~ view globalTheory tcState &
+        codeDatatypeCtors .~ view datatypeCtors tcState
     code =
       flip evalState initialCode $ do
         case Map.lookup (IR.OFunction, "main") declsMap of
@@ -88,6 +89,7 @@ compile decls = do
             Syntax.DData (Syntax.ADT name params ctors) -> do
               (adt, kind, axiom, size) <- checkADT kindScope name params ctors
               let ctorsDecls = IR.datatypeConstructors adt
+              datatypeCtors <>= foldl' (\acc c -> Map.insert (IR.ctorName c) c acc) mempty ctorsDecls
               globalTheory %= Map.insert axiom size
               maybe
                 (pure ())

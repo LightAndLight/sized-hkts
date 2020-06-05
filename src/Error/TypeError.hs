@@ -21,6 +21,7 @@ data TypeError
   | Doesn'tHaveField (TypeM Text) Text
   | CtorNotInScope Text
   | CtorArityMismatch Text Int Int
+  | MatchingOnStruct Text
   deriving (Eq, Show)
 
 renderTyName :: Either Int Text -> Text
