@@ -21,7 +21,7 @@ import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
 import Check.Entailment (Theory(..), freshSMeta, globalTheory, solve)
-import Check.Datatype (datatypeFields)
+import Check.Datatype (datatypeCtors, datatypeFields)
 import Check.Kind (checkKind)
 import Check.TCState (emptyTCState)
 import Check.Type (CheckResult(..), checkExpr, requiredConstraints, zonkExprTypes)
@@ -38,13 +38,20 @@ checkFunction ::
   MonadError TypeError m =>
   Map (IR.Constraint Void) (Size Void) ->
   Map Text IR.Fields ->
+  Map Text IR.Constructor ->
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Syntax.Function ->
   m IR.Function
-checkFunction glbl fields kindScope tyScope (Syntax.Function name tyArgs args retTy body) = do
+checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs args retTy body) = do
+  let
+    initial =
+      emptyTCState &
+        globalTheory .~ glbl &
+        datatypeFields .~ fields &
+        datatypeCtors .~ ctors
   (tyArgs', constraints', body') <-
-    flip evalStateT (emptyTCState & globalTheory .~ glbl & datatypeFields .~ fields) $ do
+    flip evalStateT initial $ do
       tyArgKinds <- traverse (fmap KVar . const freshKMeta) tyArgs
       let args' = TypeM . fmap Right . snd <$> args
       let retTy' = TypeM $ Right <$> retTy

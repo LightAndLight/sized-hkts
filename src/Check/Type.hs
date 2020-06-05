@@ -31,7 +31,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.Datatype (HasDatatypeFields, getFieldType)
+import Check.Datatype (HasDatatypeFields, HasDatatypeCtors, getConstructor, getFieldType)
 import Error.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
@@ -86,27 +86,32 @@ instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
 inferPattern ::
   ( MonadState (s ty) m
   , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
-  , forall x. HasDatatypeFields (s x)
+  , forall x. HasDatatypeFields (s x), forall x. HasDatatypeCtors (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>
-  Map Text Kind ->
-  Map Text (TypeScheme Void) ->
-  Map Text (TypeM ty) ->
-  (ty -> Text) ->
-  (tm -> Text) ->
-  (ty -> Kind) ->
-  (tm -> TypeM ty) ->
   Text ->
   Vector Text ->
-  m (TypeM ty)
-inferPattern kindScope tyScope letScope tyNames tmNames kinds types ctorName argNames =
-  error "TODO" kindScope tyScope letScope tyNames tmNames kinds types ctorName argNames
+  m (Vector (TypeM ty), TypeM ty)
+inferPattern ctorName argNames = do
+  ctor <- getConstructor ctorName
+  let
+    expectedLength = length $ IR.ctorArgs ctor
+    actualLength = length argNames
+  case expectedLength == actualLength of
+    False -> throwError $ CtorArityMismatch ctorName expectedLength actualLength
+    True -> do
+      tyArgs <- traverse (\_ -> freshTMeta KType) $ IR.ctorTyArgs ctor
+      let inst = fmap $ unvar (Left . (tyArgs Vector.!)) absurd
+      pure
+        ( TypeM . inst . snd <$> IR.ctorArgs ctor
+        , TypeM . inst $ IR.ctorRetTy ctor
+        )
 
 inferExpr ::
   ( MonadState (s ty) m
   , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
-  , forall x. HasDatatypeFields (s x)
+  , forall x. HasDatatypeFields (s x), forall x. HasDatatypeCtors (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -278,8 +283,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       caseExprs <-
         traverse
            (\(Syntax.Case ctorName ctorArgs body) -> do
-              patternType <-
-                inferPattern undefined undefined undefined undefined undefined undefined undefined undefined undefined
+              (ctorArgTypes, patternType) <- inferPattern ctorName ctorArgs
               unifyType
                 kindScope
                 (Right . tyNames)
@@ -292,9 +296,9 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
                   tyScope
                   letScope
                   tyNames
-                  (unvar (error "TODO: extend tmNames") tmNames)
+                  (unvar (ctorArgs Vector.!) tmNames)
                   kinds
-                  (unvar (error "TODO: extend types") types)
+                  (unvar (ctorArgTypes Vector.!) types)
                   body
               unifyType
                 kindScope
@@ -319,7 +323,7 @@ data CheckResult ty tm
 checkExpr ::
   ( MonadState (s ty) m
   , HasTypeMetas s, HasKindMetas (s ty), HasConstraints s
-  , forall x. HasDatatypeFields (s x)
+  , forall x. HasDatatypeFields (s x), forall x. HasDatatypeCtors (s x)
   , MonadError TypeError m
   , Ord ty
   ) =>
@@ -340,6 +344,12 @@ checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty = do
     CheckResult
     { crExpr = irExpr exprResult
     }
+
+zonkCaseTypes ::
+  Monad m =>
+  IR.Case (Either TMeta ty) tm ->
+  m (IR.Case ty tm)
+zonkCaseTypes (IR.Case n as e) = IR.Case n as <$> zonkExprTypes e
 
 zonkExprTypes ::
   Monad m =>
@@ -384,4 +394,7 @@ zonkExprTypes e =
         t
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
     IR.Project a b -> (\a' -> IR.Project a' b) <$> zonkExprTypes a
-    IR.Match a bs -> IR.Match <$> zonkExprTypes a <*> traverse (error "TODO: zonkCaseTypes") bs
+    IR.Match a bs ->
+      IR.Match <$>
+      zonkExprTypes a <*>
+      traverse zonkCaseTypes bs

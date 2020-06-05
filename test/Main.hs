@@ -220,7 +220,7 @@ main =
             , IR.funcRetTy = TVar $ B 0
             , IR.funcBody = IR.Var $ B 0
             }
-        evalStateT (checkFunction mempty mempty mempty mempty input) (emptyTCState @Void) `shouldBe`
+        evalStateT (checkFunction mempty mempty mempty mempty mempty input) (emptyTCState @Void) `shouldBe`
           Right output
       it "five() -> int32" $ do
         let
@@ -242,7 +242,7 @@ main =
             , IR.funcBody = IR.Int32 5
             }
         evalStateT
-          (checkFunction (Map.fromList Size.builtins) mempty mempty mempty input)
+          (checkFunction (Map.fromList Size.builtins) mempty mempty mempty mempty input)
           (emptyTCState @Void) `shouldBe`
           Right output
       it "check `struct Pair<A, B>(A, B)`" $ do

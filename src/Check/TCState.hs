@@ -27,7 +27,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Void (Void)
 
-import Check.Datatype (HasDatatypeFields(..))
+import Check.Datatype (HasDatatypeCtors(..), HasDatatypeFields(..))
 import Check.Entailment (HasGlobalTheory(..), HasSizeMetas(..), SMeta(..))
 import Check.TCState.FilterTypes (FilterTypes(..))
 import Check.Type (HasConstraints(..))
@@ -49,14 +49,9 @@ data TCState ty
   , _tcsSizeMeta :: SMeta
   , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
   , _tcsDatatypeFields :: Map Text IR.Fields
+  , _tcsDatatypeCtors :: Map Text IR.Constructor
   }
 makeLenses ''TCState
-
-instance HasGlobalTheory (TCState ty) where
-  globalTheory = tcsGlobalTheory
-
-instance HasSizeMetas (TCState ty) where
-  nextSMeta  = tcsSizeMeta
 
 emptyTCState :: Ord ty => TCState ty
 emptyTCState =
@@ -68,9 +63,16 @@ emptyTCState =
   , _tcsTypeSolutions = mempty
   , _tcsConstraints = mempty
   , _tcsGlobalTheory = mempty
-  , _tcsDatatypeFields = mempty
   , _tcsSizeMeta = SMeta 0
+  , _tcsDatatypeFields = mempty
+  , _tcsDatatypeCtors = mempty
   }
+
+instance HasGlobalTheory (TCState ty) where
+  globalTheory = tcsGlobalTheory
+
+instance HasSizeMetas (TCState ty) where
+  nextSMeta  = tcsSizeMeta
 
 instance HasConstraints TCState where
   requiredConstraints = tcsConstraints
@@ -115,3 +117,6 @@ instance FilterTypes TCState where
 
 instance HasDatatypeFields (TCState ty) where
   datatypeFields = tcsDatatypeFields
+
+instance HasDatatypeCtors (TCState ty) where
+  datatypeCtors = tcsDatatypeCtors

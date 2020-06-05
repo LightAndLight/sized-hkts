@@ -17,7 +17,7 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import Data.Void (Void)
 
-import Check.Datatype (HasDatatypeFields, checkADT, datatypeFields)
+import Check.Datatype (HasDatatypeCtors, HasDatatypeFields, checkADT, datatypeCtors, datatypeFields)
 import Check.Entailment (HasSizeMetas, HasGlobalTheory, globalTheory)
 import Check.Function (checkFunction)
 import Check.TCState (emptyTCState)
@@ -65,6 +65,7 @@ compile decls = do
       ( MonadState (s (Var Int Void)) m
       , FilterTypes s
       , HasTypeMetas s
+      , forall x. HasDatatypeCtors (s x)
       , forall x. HasDatatypeFields (s x)
       , forall x. HasKindMetas (s x)
       , forall x. HasSizeMetas (s x)
@@ -114,7 +115,8 @@ compile decls = do
             Syntax.DFunc func -> do
               global <- use globalTheory
               fields <- use datatypeFields
-              func' <- checkFunction global fields kindScope tyScope func
+              ctors <- use datatypeCtors
+              func' <- checkFunction global fields ctors kindScope tyScope func
               (kindScope', tyScope', rest') <-
                 checkDecls
                   kindScope

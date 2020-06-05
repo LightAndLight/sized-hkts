@@ -4,7 +4,14 @@
 {-# language PatternSynonyms #-}
 {-# language ScopedTypeVariables #-}
 {-# language QuantifiedConstraints #-}
-module Check.Datatype where
+module Check.Datatype
+  ( checkADT
+  , HasDatatypeFields(..)
+  , getFieldType
+  , HasDatatypeCtors(..)
+  , getConstructor
+  )
+where
 
 import Bound (abstract)
 import Bound.Var (Var(..), unvar)
@@ -47,6 +54,21 @@ import Unify.TMeta (HasTypeMetas)
 
 class HasDatatypeFields s where
   datatypeFields :: Lens' s (Map Text IR.Fields)
+
+class HasDatatypeCtors s where
+  datatypeCtors :: Lens' s (Map Text IR.Constructor)
+
+getConstructor ::
+  ( MonadState s m, HasDatatypeCtors s
+  , MonadError TypeError m
+  ) =>
+  Text ->
+  m IR.Constructor
+getConstructor ctorName = do
+  m_ctor <- uses datatypeCtors $ Map.lookup ctorName
+  case m_ctor of
+    Nothing -> throwError $ CtorNotInScope ctorName
+    Just ctor -> pure ctor
 
 getFieldType ::
   ( MonadState s m, HasDatatypeFields s

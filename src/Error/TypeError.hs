@@ -19,6 +19,8 @@ data TypeError
   | TNotInScope Text
   | CouldNotDeduce (Constraint (Either TMeta Text))
   | Doesn'tHaveField (TypeM Text) Text
+  | CtorNotInScope Text
+  | CtorArityMismatch Text Int Int
   deriving (Eq, Show)
 
 renderTyName :: Either Int Text -> Text
