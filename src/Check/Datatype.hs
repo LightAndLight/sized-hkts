@@ -32,7 +32,7 @@ import Check.Entailment
   , globalTheory
   , solve
   )
-import Check.Kind (checkKind, unifyKind)
+import Check.Kind (checkKind)
 import Check.TypeError (TypeError)
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
@@ -44,6 +44,7 @@ import TCState
   , freshKMeta
   , solveKMetas
   )
+import Unify.Kind (unifyKind)
 
 makeSizeTerm ::
   forall s m.

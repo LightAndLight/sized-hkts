@@ -341,6 +341,7 @@ genExpr vars expr =
           pure $ C.Project a' (Text.pack $ '_' : show ix)
         IR.Field n ->
           pure $ C.Project a' n
+    IR.Match a b -> error "TODO" a b
 
 genConstructor ::
   (MonadState Code m) =>

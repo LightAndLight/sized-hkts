@@ -31,6 +31,7 @@ library
                      , Syntax
                      , TCState
                      , Typecheck
+                     , Unify.Kind
   build-depends:       base ^>=4.12.0.0
                      , bifunctors
                      , bound

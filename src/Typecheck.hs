@@ -35,7 +35,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.Kind (inferKind, unifyKind)
+import Check.Kind (inferKind)
 import Check.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
@@ -51,6 +51,7 @@ import TCState
   , solveTMetas_Type
   , HasDatatypeFields, getFieldType
   )
+import Unify.Kind (unifyKind)
 
 applyTSubs_Constraint ::
   Map TMeta (TypeM ty) ->
@@ -199,7 +200,7 @@ inferPattern ::
   Vector Text ->
   m (TypeM ty)
 inferPattern kindScope tyScope letScope tyNames tmNames kinds types ctorName argNames =
-  _
+  error "TODO" kindScope tyScope letScope tyNames tmNames kinds types ctorName argNames
 
 inferExpr ::
   ( MonadState (s ty) m
@@ -374,31 +375,33 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
       resTy <- Syntax.TVar . Left <$> freshTMeta KType
       caseExprs <-
-        traverse_
+        traverse
            (\(Syntax.Case ctorName ctorArgs body) -> do
+              patternType <-
+                inferPattern undefined undefined undefined undefined undefined undefined undefined undefined undefined
               unifyType
                 kindScope
                 (Right . tyNames)
                 kinds
                 (irType aResult)
-                _patternType
+                patternType
               bodyResult <-
                 inferExpr
                   kindScope
                   tyScope
                   letScope
                   tyNames
-                  (unvar _ tmNames)
+                  (unvar (error "TODO: extend tmNames") tmNames)
                   kinds
-                  (unvar _ types)
+                  (unvar (error "TODO: extend types") types)
                   body
               unifyType
                 kindScope
                 (Right . tyNames)
                 kinds
-                resTy
+                (TypeM resTy)
                 (irType bodyResult)
-              pure $ irExpr bodyResult
+              pure $ IR.Case ctorName ctorArgs (irExpr bodyResult)
            )
            cases
       pure $
@@ -480,3 +483,4 @@ zonkExprTypes e =
         t
     IR.Deref a -> IR.Deref <$> zonkExprTypes a
     IR.Project a b -> (\a' -> IR.Project a' b) <$> zonkExprTypes a
+    IR.Match a bs -> IR.Match <$> zonkExprTypes a <*> traverse (error "TODO: zonkCaseTypes") bs
