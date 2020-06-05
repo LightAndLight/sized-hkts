@@ -8,12 +8,14 @@
 module Check.Type
   ( CheckResult(..), InferResult(..)
   , checkExpr, inferExpr
+  , HasConstraints(..)
   , applyTSubs_Constraint
   , zonkExprTypes
   )
 where
 
 import Bound.Var (unvar)
+import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((<>=))
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
@@ -29,11 +31,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.TCState
-  ( HasConstraints
-  , requiredConstraints
-  , HasDatatypeFields, getFieldType
-  )
+import Check.Datatype (HasDatatypeFields, getFieldType)
 import Error.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
@@ -42,6 +40,9 @@ import qualified IR
 import Unify.KMeta (HasKindMetas)
 import Unify.TMeta (HasTypeMetas, freshTMeta, solveTMetas_Type)
 import Unify.Type (unifyType)
+
+class HasConstraints s where
+  requiredConstraints :: Lens' (s ty) (Set (IR.Constraint (Either TMeta ty)))
 
 applyTSubs_Constraint ::
   Map TMeta (TypeM ty) ->

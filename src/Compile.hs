@@ -17,10 +17,10 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import Data.Void (Void)
 
-import Check.Datatype (checkADT)
+import Check.Datatype (HasDatatypeFields, checkADT, datatypeFields)
 import Check.Entailment (HasSizeMetas, HasGlobalTheory, globalTheory)
 import Check.Function (checkFunction)
-import Check.TCState (HasDatatypeFields, emptyTCState, datatypeFields)
+import Check.TCState (emptyTCState)
 import Check.TCState.FilterTypes (FilterTypes)
 import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
 import qualified Codegen

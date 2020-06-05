@@ -21,13 +21,10 @@ import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
 import Check.Entailment (Theory(..), freshSMeta, globalTheory, solve)
+import Check.Datatype (datatypeFields)
 import Check.Kind (checkKind)
-import Check.TCState
-  ( emptyTCState
-  , datatypeFields
-  , requiredConstraints
-  )
-import Check.Type (CheckResult(..), checkExpr, zonkExprTypes)
+import Check.TCState (emptyTCState)
+import Check.Type (CheckResult(..), checkExpr, requiredConstraints, zonkExprTypes)
 import Error.TypeError (TypeError(..))
 import Syntax (pattern TypeM, unTypeM)
 import qualified Syntax

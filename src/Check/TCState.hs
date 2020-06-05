@@ -14,34 +14,27 @@ module Check.TCState
   , tcsTypeSolutions
   , tcsConstraints
   , tcsGlobalTheory
-  , HasConstraints(..)
-  , HasDatatypeFields(..)
-  , getFieldType
   )
 where
 
-import Bound.Var (Var(..))
-import Control.Lens.Getter ((^.), uses)
-import Control.Lens.Lens (Lens')
+import Control.Lens.Getter ((^.))
 import Control.Lens.TH (makeLenses)
-import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.State (MonadState)
 import Data.Foldable (foldl')
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Vector as Vector
 import Data.Void (Void)
 
+import Check.Datatype (HasDatatypeFields(..))
 import Check.Entailment (HasGlobalTheory(..), HasSizeMetas(..), SMeta(..))
 import Check.TCState.FilterTypes (FilterTypes(..))
-import Error.TypeError (TypeError(..))
+import Check.Type (HasConstraints(..))
 import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
 import Size (Size)
-import Syntax (TMeta(..), Type(..), TypeM)
+import Syntax (TMeta(..), TypeM)
 import Unify.KMeta (HasKindMetas(..))
 import Unify.TMeta (HasTypeMetas(..))
 
@@ -78,9 +71,6 @@ emptyTCState =
   , _tcsDatatypeFields = mempty
   , _tcsSizeMeta = SMeta 0
   }
-
-class HasConstraints s where
-  requiredConstraints :: Lens' (s ty) (Set (Constraint (Either TMeta ty)))
 
 instance HasConstraints TCState where
   requiredConstraints = tcsConstraints
@@ -123,30 +113,5 @@ instance FilterTypes TCState where
       , _tcsConstraints = constraints'
       }
 
-class HasDatatypeFields s where
-  datatypeFields :: Lens' s (Map Text IR.Fields)
-
 instance HasDatatypeFields (TCState ty) where
   datatypeFields = tcsDatatypeFields
-
-getFieldType ::
-  ( MonadState s m, HasDatatypeFields s
-  , MonadError TypeError m
-  ) =>
-  Text ->
-  IR.Projection ->
-  m (Maybe (Type (Var Int Void)))
-getFieldType tyName prj = do
-  m_fs <- uses datatypeFields $ Map.lookup tyName
-  case m_fs of
-    Nothing -> throwError $ TNotInScope tyName
-    Just fs ->
-      pure $ case prj of
-        IR.Numeric ix ->
-          case fs of
-            IR.Unnamed fs' -> Just $ fs' Vector.! fromIntegral ix
-            _ -> Nothing
-        IR.Field n ->
-          case fs of
-            IR.Named fs' -> Map.lookup n fs'
-            _ -> Nothing

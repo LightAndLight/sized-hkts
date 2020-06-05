@@ -8,9 +8,10 @@ module Check.Datatype where
 
 import Bound (abstract)
 import Bound.Var (Var(..), unvar)
-import Control.Lens.Getter (use)
+import Control.Lens.Lens (Lens')
+import Control.Lens.Getter (use, uses)
 import Control.Monad (guard)
-import Control.Monad.Except (MonadError)
+import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
 import Control.Monad.Writer (runWriter, tell)
 import Data.Foldable (foldlM, traverse_)
@@ -34,7 +35,7 @@ import Check.Entailment
   )
 import Check.Kind (checkKind)
 import Check.TCState.FilterTypes (FilterTypes)
-import Error.TypeError (TypeError)
+import Error.TypeError (TypeError(..))
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
@@ -43,6 +44,31 @@ import qualified Syntax
 import Unify.KMeta (HasKindMetas, freshKMeta, solveKMetas)
 import Unify.Kind (unifyKind)
 import Unify.TMeta (HasTypeMetas)
+
+class HasDatatypeFields s where
+  datatypeFields :: Lens' s (Map Text IR.Fields)
+
+getFieldType ::
+  ( MonadState s m, HasDatatypeFields s
+  , MonadError TypeError m
+  ) =>
+  Text ->
+  IR.Projection ->
+  m (Maybe (Type (Var Int Void)))
+getFieldType tyName prj = do
+  m_fs <- uses datatypeFields $ Map.lookup tyName
+  case m_fs of
+    Nothing -> throwError $ TNotInScope tyName
+    Just fs ->
+      pure $ case prj of
+        IR.Numeric ix ->
+          case fs of
+            IR.Unnamed fs' -> Just $ fs' Vector.! fromIntegral ix
+            _ -> Nothing
+        IR.Field n ->
+          case fs of
+            IR.Named fs' -> Map.lookup n fs'
+            _ -> Nothing
 
 makeSizeTerm ::
   forall s m.
