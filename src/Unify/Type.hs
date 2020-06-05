@@ -16,12 +16,8 @@ import Error.TypeError (TypeError(..), typeMismatch, renderTyName)
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..))
-import TCState
-  ( HasTypeMetas
-  , tmetaSolutions
-  , getTMeta
-  )
 import Unify.Kind (HasKindMetas, unifyKind)
+import Unify.TMeta (HasTypeMetas, getTMeta, tmetaSolutions)
 
 unifyType ::
   ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)

@@ -33,10 +33,9 @@ import TCState
   ( emptyTCState
   , datatypeFields
   , requiredConstraints
-  , solveMetas_Constraint
-  , solveTMetas_Expr
   )
 import Unify.Kind (freshKMeta, solveKMetas)
+import Unify.TMeta (solveMetas_Constraint, solveTMetas_Expr)
 
 checkFunction ::
   MonadError TypeError m =>
