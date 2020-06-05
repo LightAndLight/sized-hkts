@@ -22,10 +22,10 @@ library
                      , Check.Function
                      , Check.Kind
                      , Check.Type
-                     , Check.TypeError
                      , Codegen
                      , Codegen.C
                      , Compile
+                     , Error.TypeError
                      , IR
                      , Size
                      , Size.Builtins

@@ -33,7 +33,7 @@ import Check.Entailment
   , solve
   )
 import Check.Kind (checkKind)
-import Check.TypeError (TypeError)
+import Error.TypeError (TypeError)
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)

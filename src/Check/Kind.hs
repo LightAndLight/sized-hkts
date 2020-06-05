@@ -12,7 +12,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)
 
-import Check.TypeError (TypeError(..))
+import Error.TypeError (TypeError(..))
 import IR (Kind(..))
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax

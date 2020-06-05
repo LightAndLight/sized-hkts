@@ -23,7 +23,7 @@ import Data.Void (Void, absurd)
 import Check.Entailment (Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
 import Check.Kind (checkKind)
 import Check.Type (CheckResult(..), checkExpr, zonkExprTypes)
-import Check.TypeError (TypeError(..))
+import Error.TypeError (TypeError(..))
 import Syntax (pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)

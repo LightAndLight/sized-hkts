@@ -20,10 +20,10 @@ import Data.Void (Void)
 import Check.Datatype (checkADT)
 import Check.Entailment (HasSizeMetas, HasGlobalTheory, emptyEntailState, globalTheory)
 import Check.Function (checkFunction)
-import Check.TypeError (TypeError)
 import Codegen (codeKinds, codeDeclarations, codeGlobalTheory)
 import qualified Codegen
 import qualified Codegen.C as C
+import Error.TypeError (TypeError)
 import qualified IR
 import TCState (FilterTypes, HasDatatypeFields, HasTypeMetas, HasKindMetas, emptyTCState, datatypeFields)
 import qualified Size.Builtins as Size

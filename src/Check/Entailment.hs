@@ -41,7 +41,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void, absurd)
 
-import Check.TypeError (TypeError(..), renderTyName)
+import Error.TypeError (TypeError(..), renderTyName)
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import Syntax (TMeta(..), TMeta, pattern TypeM)

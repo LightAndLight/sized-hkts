@@ -12,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 
 import Check.Kind (inferKind)
-import Check.TypeError (TypeError(..), typeMismatch, renderTyName)
+import Error.TypeError (TypeError(..), typeMismatch, renderTyName)
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..))

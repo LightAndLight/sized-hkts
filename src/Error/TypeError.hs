@@ -1,4 +1,4 @@
-module Check.TypeError where
+module Error.TypeError where
 
 import Data.Text (Text)
 import qualified Data.Text as Text

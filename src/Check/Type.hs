@@ -29,7 +29,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.TypeError (TypeError(..))
+import Error.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)

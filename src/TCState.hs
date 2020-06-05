@@ -48,7 +48,7 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
 
-import Check.TypeError (TypeError(..))
+import Error.TypeError (TypeError(..))
 import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
 import Size (Size)

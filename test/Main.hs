@@ -24,9 +24,9 @@ import Check.Entailment
   , freshSMeta, simplify, solve
   )
 import Check.Function (checkFunction)
-import Check.TypeError (TypeError(..))
 import qualified Codegen.C as C
 import qualified Compile
+import Error.TypeError (TypeError(..))
 import Size ((.@), Size, sizeConstraintFor)
 import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)

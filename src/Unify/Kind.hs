@@ -7,7 +7,7 @@ import Control.Monad.State (MonadState)
 import qualified Data.Map as Map
 import Data.Monoid (Any(..))
 
-import Check.TypeError (TypeError(..))
+import Error.TypeError (TypeError(..))
 import IR (Kind(..), foldKMeta)
 import TCState
   ( HasKindMetas, kmetaSolutions
