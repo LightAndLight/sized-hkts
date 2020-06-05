@@ -14,12 +14,11 @@ module TCState
   , tcsTypeSolutions
   , tcsConstraints
   , tcsGlobalTheory
-  , HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
+  , HasTypeMetas(..), HasConstraints(..)
   , FilterTypes(..), mapTypes
-  , freshTMeta, freshKMeta
-  , getTMeta, getKMeta
+  , freshTMeta
+  , getTMeta
   , getTMetaKind
-  , solveKMetas, solveKMetasMaybe
   , solveTMetas_Type
   , solveTMetas_Expr
   , solveMetas_Constraint
@@ -29,15 +28,12 @@ module TCState
 where
 
 import Bound.Var (Var(..))
-import Control.Applicative (empty)
 import Control.Lens.Getter ((^.), use, uses)
 import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((%=), (.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State (MonadState)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldl')
 import Data.Map (Map)
@@ -53,6 +49,7 @@ import IR (Constraint, KMeta(..), Kind(..))
 import qualified IR
 import Size (Size)
 import Syntax (TMeta(..), Type(..), TypeM, unTypeM)
+import Unify.Kind (HasKindMetas(..), solveKMetas)
 
 data TCState ty
   = TCState
@@ -102,10 +99,6 @@ instance HasTypeMetas TCState where
   tmetaKinds = tcsTypeMetaKinds
   tmetaSolutions = tcsTypeSolutions
 
-class HasKindMetas s where
-  nextKMeta :: Lens' s KMeta
-  kmetaSolutions :: Lens' s (Map KMeta Kind)
-
 instance HasKindMetas (TCState ty) where
   nextKMeta = tcsKindMeta
   kmetaSolutions = tcsKindSolutions
@@ -139,26 +132,12 @@ instance FilterTypes TCState where
       , _tcsConstraints = constraints'
       }
 
-freshKMeta :: (MonadState s m, HasKindMetas s) => m KMeta
-freshKMeta = do
-  KMeta k <- use nextKMeta
-  nextKMeta .= KMeta (k+1)
-  pure $ KMeta k
-
 freshTMeta :: (MonadState (s ty) m, HasTypeMetas s) => Kind -> m TMeta
 freshTMeta k = do
   TMeta t <- use nextTMeta
   nextTMeta .= TMeta (t+1)
   tmetaKinds %= Map.insert (TMeta t) k
   pure $ TMeta t
-
-getKMeta ::
-  (MonadState s m, HasKindMetas s) =>
-  KMeta ->
-  m (Maybe Kind)
-getKMeta v = do
-  sols <- use kmetaSolutions
-  pure $ Map.lookup v sols
 
 getTMeta ::
   (MonadState (s ty) m, HasTypeMetas s) =>
@@ -201,44 +180,6 @@ solveTMetas_Type d = go d
         TPtr -> pure TPtr
         TFun ts -> TFun <$> traverse (go depth) ts
         TName n -> pure $ TName n
-
-solveKMetasMaybe ::
-  (MonadState s m, HasKindMetas s) =>
-  IR.Kind ->
-  m (Maybe IR.Kind)
-solveKMetasMaybe = runMaybeT . go
-  where
-    go ::
-      (MonadState s m, HasKindMetas s) =>
-      IR.Kind ->
-      MaybeT m IR.Kind
-    go k =
-      case k of
-        IR.KVar m ->
-          maybe empty go =<<
-          lift (getKMeta m)
-        IR.KArr a b ->
-          IR.KArr <$> go a <*> go b
-        IR.KType -> pure IR.KType
-
-solveKMetas ::
-  (MonadState s m, HasKindMetas s) =>
-  IR.Kind ->
-  m IR.Kind
-solveKMetas = go
-  where
-    go ::
-      (MonadState s m, HasKindMetas s) =>
-      IR.Kind ->
-      m IR.Kind
-    go k =
-      case k of
-        IR.KVar m ->
-          maybe (pure $ IR.KVar m) go =<<
-          getKMeta m
-        IR.KArr a b ->
-          IR.KArr <$> go a <*> go b
-        IR.KType -> pure IR.KType
 
 solveMetas_Constraint ::
   (MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)) =>

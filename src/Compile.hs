@@ -25,9 +25,10 @@ import qualified Codegen
 import qualified Codegen.C as C
 import Error.TypeError (TypeError)
 import qualified IR
-import TCState (FilterTypes, HasDatatypeFields, HasTypeMetas, HasKindMetas, emptyTCState, datatypeFields)
+import TCState (FilterTypes, HasDatatypeFields, HasTypeMetas, emptyTCState, datatypeFields)
 import qualified Size.Builtins as Size
 import qualified Syntax
+import Unify.Kind (HasKindMetas)
 
 compile ::
   MonadError TypeError m =>

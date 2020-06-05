@@ -32,12 +32,11 @@ import Size (Size)
 import TCState
   ( emptyTCState
   , datatypeFields
-  , freshKMeta
   , requiredConstraints
   , solveMetas_Constraint
   , solveTMetas_Expr
-  , solveKMetas
   )
+import Unify.Kind (freshKMeta, solveKMetas)
 
 checkFunction ::
   MonadError TypeError m =>

@@ -17,11 +17,10 @@ import IR (Kind(..))
 import Syntax (TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import TCState
-  ( HasKindMetas, HasTypeMetas
-  , freshKMeta
+  ( HasTypeMetas
   , getTMetaKind
   )
-import Unify.Kind (unifyKind)
+import Unify.Kind (HasKindMetas, freshKMeta, unifyKind)
 
 checkKind ::
   ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)

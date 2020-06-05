@@ -47,12 +47,13 @@ import Size((.@), Size(..), pattern Var)
 import Syntax (TMeta(..), TMeta, pattern TypeM)
 import TCState
   ( TCState
-  , HasDatatypeFields(..), HasTypeMetas(..), HasKindMetas(..), HasConstraints(..)
+  , HasDatatypeFields(..), HasTypeMetas(..), HasConstraints(..)
   , freshTMeta
   , FilterTypes, filterTypes, mapTypes
   , solveMetas_Constraint
   , tcsGlobalTheory
   )
+import Unify.Kind (HasKindMetas(..))
 import Unify.Type (unifyType)
 
 newtype SMeta = SMeta Int

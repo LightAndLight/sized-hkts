@@ -35,12 +35,13 @@ import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
 import TCState
-  ( HasKindMetas, HasTypeMetas, HasConstraints
+  ( HasTypeMetas, HasConstraints
   , freshTMeta
   , requiredConstraints
   , solveTMetas_Type
   , HasDatatypeFields, getFieldType
   )
+import Unify.Kind (HasKindMetas)
 import Unify.Type (unifyType)
 
 applyTSubs_Constraint ::
