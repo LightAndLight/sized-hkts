@@ -21,6 +21,7 @@ library
                      , Check.Entailment
                      , Check.Function
                      , Check.Kind
+                     , Check.Type
                      , Check.TypeError
                      , Codegen
                      , Codegen.C
@@ -30,7 +31,6 @@ library
                      , Size.Builtins
                      , Syntax
                      , TCState
-                     , Typecheck
                      , Unify.Kind
                      , Unify.Type
   build-depends:       base ^>=4.12.0.0

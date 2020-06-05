@@ -27,7 +27,7 @@ import Check.Function (checkFunction)
 import Check.TypeError (TypeError(..))
 import qualified Codegen.C as C
 import qualified Compile
-import Size ((.@), Size)
+import Size ((.@), Size, sizeConstraintFor)
 import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
@@ -35,7 +35,6 @@ import qualified IR
 import Syntax (Type(..), TMeta)
 import qualified Syntax
 import TCState (emptyTCState)
-import Typecheck (sizeConstraintFor)
 
 main :: IO ()
 main =

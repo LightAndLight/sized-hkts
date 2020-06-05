@@ -5,14 +5,10 @@
 {-# language QuantifiedConstraints #-}
 {-# language TemplateHaskell #-}
 {-# language ViewPatterns #-}
-module Typecheck
-  ( sizeConstraintFor
+module Check.Type
+  ( CheckResult(..), InferResult(..)
+  , checkExpr, inferExpr
   , applyTSubs_Constraint
-  , renderTyName
-  , TypeError(..)
-  , CheckResult(..), InferResult(..)
-  , checkExpr
-  , inferExpr
   , zonkExprTypes
   )
 where
@@ -33,12 +29,11 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 
-import Check.TypeError (TypeError(..), renderTyName)
+import Check.TypeError (TypeError(..))
 import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
-import Size (sizeConstraintFor)
 import TCState
   ( HasKindMetas, HasTypeMetas, HasConstraints
   , freshTMeta

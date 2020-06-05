@@ -22,6 +22,7 @@ import Data.Void (Void, absurd)
 
 import Check.Entailment (Theory(..), emptyEntailState, freshSMeta, globalTheory, solve)
 import Check.Kind (checkKind)
+import Check.Type (CheckResult(..), checkExpr, zonkExprTypes)
 import Check.TypeError (TypeError(..))
 import Syntax (pattern TypeM, unTypeM)
 import qualified Syntax
@@ -37,7 +38,6 @@ import TCState
   , solveTMetas_Expr
   , solveKMetas
   )
-import Typecheck (CheckResult(..), checkExpr, zonkExprTypes)
 
 checkFunction ::
   MonadError TypeError m =>

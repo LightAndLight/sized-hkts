@@ -41,7 +41,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void, absurd)
 
-import Check.TypeError (TypeError(..))
+import Check.TypeError (TypeError(..), renderTyName)
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
 import Syntax (TMeta(..), TMeta, pattern TypeM)
@@ -53,7 +53,6 @@ import TCState
   , solveMetas_Constraint
   , tcsGlobalTheory
   )
-import Typecheck (renderTyName)
 import Unify.Type (unifyType)
 
 newtype SMeta = SMeta Int
