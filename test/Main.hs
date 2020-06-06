@@ -33,7 +33,7 @@ import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
 import qualified IR
-import Syntax (Type(..), TMeta)
+import Syntax (Type(..), pattern TypeM, TMeta(..))
 import qualified Syntax
 
 main :: IO ()
@@ -725,5 +725,94 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code -> do
-            Text.putStrLn $ C.prettyCDecls code
             code `shouldBe` output
+      it "8" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "List"
+              , Syntax.adtArgs = ["A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Nil" [] $
+                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt32
+              , Syntax.funcBody =
+                  let
+                    e =
+                      Syntax.Call
+                        (Syntax.Name "Cons")
+                        [ Syntax.BTrue
+                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                        ]
+                  in
+                    Syntax.Match e
+                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
+                      , Syntax.Case "Cons" ["a", "b"] $
+                        Syntax.Var (B 0)
+                      ]
+              }
+            ]
+        case Compile.compile input of
+          Left err ->
+            err `shouldBe`
+            TypeMismatch (TypeM TInt32) (TypeM TBool)
+          Right code -> expectationFailure $ "expected error, got " <> show code
+      it "9" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "Either"
+              , Syntax.adtArgs = ["A", "B"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Left" [TVar $ B 0] $
+                Syntax.Ctor "Right" [TVar $ B 1] $
+                Syntax.End
+              }
+            , Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "List"
+              , Syntax.adtArgs = ["A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Nil" [] $
+                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt32
+              , Syntax.funcBody =
+                  let
+                    e =
+                      Syntax.Call
+                        (Syntax.Name "Cons")
+                        [ Syntax.Number 1
+                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                        ]
+                  in
+                    Syntax.Match e
+                      [ Syntax.Case "Left" ["a"] $
+                        Syntax.Var (B 0)
+                      , Syntax.Case "Cons" ["a", "b"] $
+                        Syntax.Var (B 0)
+                      ]
+              }
+            ]
+        case Compile.compile input of
+          Left err ->
+            err `shouldBe`
+            TypeMismatch
+              (TypeM $ TName "List")
+              (TypeM $ TApp (TName "Either") (TVar . Left $ TMeta 5))
+          Right code -> expectationFailure $ "expected error, got " <> show code
