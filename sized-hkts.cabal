@@ -37,6 +37,7 @@ library
                      , Unify.TMeta
                      , Unify.Type
   build-depends:       base ^>=4.12.0.0
+                     , wl-pprint-text
                      , bifunctors
                      , bound
                      , containers

@@ -725,6 +725,7 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code -> do
+            Text.putStrLn $ C.render (C.prettyCDecls code)
             code `shouldBe` output
       it "8" $ do
         let

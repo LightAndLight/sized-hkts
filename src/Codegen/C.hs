@@ -8,6 +8,7 @@ module Codegen.C
   , CType(..)
   , CExpr(..)
   , preamble
+  , render
   , prettyCDecls
   , prettyCStatement
   , prettyCType
@@ -18,9 +19,13 @@ where
 import Data.Foldable (fold)
 import qualified Data.List as List
 import Data.Text (Text)
-import qualified Data.Text as Text
+import qualified Data.Text.Lazy as Lazy
 import Data.Vector (Vector)
+import qualified Data.Vector as Vector
 import Data.Word (Word64)
+import GHC.Exts (fromString)
+import Text.PrettyPrint.Leijen.Text (Doc)
+import qualified Text.PrettyPrint.Leijen.Text as Pretty
 
 newtype Ann = Ann Text
   deriving (Eq, Show)
@@ -72,131 +77,172 @@ data CDecl
 newtype C = C [CDecl]
   deriving (Eq, Show, Semigroup, Monoid)
 
-intersperseMap :: Foldable f => Text -> (a -> Text) -> f a -> Text
+intersperseMap :: (Foldable f, Monoid m) => m -> (a -> m) -> f a -> m
 intersperseMap sep f = fold . List.intersperse sep . foldr ((:) . f) []
 
-parens :: Text -> Text
-parens a = "(" <> a <> ")"
+render :: Doc -> Text
+render = Lazy.toStrict . Pretty.displayT . Pretty.renderPretty 1.0 100
 
-brackets :: Text -> Text
-brackets a = "[" <> a <> "]"
-
-prettyCExpr :: CExpr -> Text
+prettyCExpr :: CExpr -> Doc
 prettyCExpr e =
   case e of
     BTrue -> "true"
     BFalse -> "false"
-    Alloca a -> "alloca(" <> prettyCExpr a <> ")"
-    Malloc a -> "malloc(" <> prettyCExpr a <> ")"
-    Number a -> Text.pack $ show a
-    Var a -> a
+    Alloca a -> "alloca" <> Pretty.parens (prettyCExpr a)
+    Malloc a -> "malloc" <> Pretty.parens (prettyCExpr a)
+    Number a -> fromString $ show a
+    Var a -> Pretty.textStrict a
     Call a bs ->
       (case a of
-         Cast{} -> parens
-         Deref{} -> parens
-         Plus{} -> parens
+         Cast{} -> Pretty.parens
+         Deref{} -> Pretty.parens
+         Plus{} -> Pretty.parens
          _ -> id
       ) (prettyCExpr a) <>
-      parens (intersperseMap ", " prettyCExpr bs)
+      Pretty.parens (intersperseMap ", " prettyCExpr bs)
     Deref a ->
       "*" <>
       (case a of
-         Plus{} -> parens
+         Plus{} -> Pretty.parens
          _ -> id)
       (prettyCExpr a)
     Index a n ->
       (case a of
-         Cast{} -> parens
-         Plus{} -> parens
+         Cast{} -> Pretty.parens
+         Plus{} -> Pretty.parens
          _ -> id)
       (prettyCExpr a) <>
-      brackets (Text.pack $ show n)
+      Pretty.brackets (fromString $ show n)
     Cast t a ->
-      parens (prettyCType t) <>
+      Pretty.parens (prettyCType t) <>
       (case a of
-         Cast{} -> parens
-         Deref{} -> parens
-         Plus{} -> parens
+         Cast{} -> Pretty.parens
+         Deref{} -> Pretty.parens
+         Plus{} -> Pretty.parens
          _ -> id
       ) (prettyCExpr a)
     Plus a b ->
       prettyCExpr a <>
       " + " <>
       prettyCExpr b
-    Init as -> "{" <> intersperseMap ", " prettyCExpr as <> "}"
-    InitNamed as -> "{" <> intersperseMap ", " (\(a, b) -> "." <> a <> " = " <> prettyCExpr b) as <> "}"
+    Init as -> Pretty.braces $ intersperseMap ", " prettyCExpr as
+    InitNamed as ->
+      Pretty.braces $
+      intersperseMap
+        ", "
+        (\(a, b) -> "." <> Pretty.textStrict a <> " = " <> prettyCExpr b)
+        as
     Project a b ->
       (case a of
-         Cast{} -> parens
-         Plus{} -> parens
+         Cast{} -> Pretty.parens
+         Plus{} -> Pretty.parens
          _ -> id
       )
       (prettyCExpr a) <>
-      "." <> b
+      "." <> Pretty.textStrict b
     Eq a b ->
       prettyCExpr a <>
       " == " <>
       prettyCExpr b
 
-prettyCType :: CType -> Text
+prettyCType :: CType -> Doc
 prettyCType t =
   case t of
     Ptr a -> prettyCType a <> " *"
-    FunPtr ret args -> "(" <> prettyCType ret <> ")*(" <> intersperseMap ", " prettyCType args <> ")"
+    FunPtr ret args ->
+      Pretty.parens (prettyCType ret) <>
+      "*" <>
+      Pretty.parens (intersperseMap ", " prettyCType args)
     Void m_ann  ->
-      "void" <> foldMap (\(Ann a) -> " /* " <> a <> " */") m_ann
+      "void" <>
+      foldMap (\(Ann a) -> " /* " <> Pretty.textStrict a <> " */") m_ann
     Int32 -> "int32_t"
     UInt8 -> "uint8_t"
     Bool -> "bool"
-    Name n -> n
+    Name n -> Pretty.textStrict n
     TStruct fs ->
-      "struct { " <>
-      foldMap (\(ft, fn) -> prettyCType ft <> " " <> fn <> "; ") fs <>
-      "}"
+      "struct " <>
+      Pretty.braces
+        (" " <>
+         foldMap
+           (\(ft, fn) -> prettyCType ft <> " " <> Pretty.textStrict fn <> "; ")
+           fs
+        )
     Union vs ->
-      "union {\n" <>
-      foldMap
-        (\(vt, vn) -> prettyCType vt <> " " <> vn <> ";\n")
-        vs <>
-      "}"
+      "union " <>
+      Pretty.lbrace Pretty.<$>
+      Pretty.indent 4
+        (Pretty.vsep . Vector.toList $
+         fmap
+           (\(vt, vn) ->
+              prettyCType vt <> " " <>
+              Pretty.textStrict vn <> ";"
+           )
+           vs
+        ) Pretty.<$>
+      Pretty.rbrace
 
-prettyCStatement :: CStatement -> Text
+prettyCStatement :: CStatement -> Doc
 prettyCStatement s =
   case s of
     Return e -> "return " <> prettyCExpr e
-    Declare t n e -> prettyCType t <> " " <> n <> foldMap ((" = " <>) . prettyCExpr) e
+    Declare t n e ->
+      prettyCType t <> " " <>
+      Pretty.textStrict n <>
+      foldMap ((" = " <>) . prettyCExpr) e
     Assign l r -> prettyCExpr l <> " = " <> prettyCExpr r
     If cond ss ->
-      "if (" <> prettyCExpr cond <> ") {\n" <>
-      foldMap (\s' -> prettyCStatement s' <> ";\n") ss <>
-      "}"
+      "if " <> Pretty.parens (prettyCExpr cond) <> " " <>
+      Pretty.lbrace Pretty.<$>
+      Pretty.indent 4
+        (Pretty.vsep $
+         fmap (\s' -> prettyCStatement s' <> ";") ss
+        ) Pretty.<$>
+      Pretty.rbrace
 
-prettyCDecl :: CDecl -> Text
+prettyCDecl :: CDecl -> Doc
 prettyCDecl d =
   case d of
-    Include n -> "#include " <> n
+    Include n -> "#include " <> Pretty.textStrict n
     Function ty n args body ->
-      prettyCType ty <> " " <> n <>
-      "(" <> intersperseMap ", " (\(argTy, argName) -> prettyCType argTy <> " " <> argName) args <> ") " <>
-      "{\n\n" <>
-      foldMap (\s -> prettyCStatement s <> ";\n") body <>
-      "\n}"
+      prettyCType ty <> " " <> Pretty.textStrict n <>
+      Pretty.parens
+        (intersperseMap
+          ", "
+          (\(argTy, argName) ->
+            prettyCType argTy <> " " <> Pretty.textStrict argName
+          )
+          args
+        ) <>
+      " " <>
+      Pretty.lbrace Pretty.<$>
+      Pretty.indent 4
+        (Pretty.vsep $
+         fmap (\s -> prettyCStatement s <> ";") body
+        ) Pretty.<$>
+      Pretty.rbrace
     Typedef t n ->
-      "typedef " <> prettyCType t <> " " <> n
+      "typedef " <> prettyCType t <> " " <> Pretty.textStrict n
     Struct n fs ->
-      "struct " <> n <> " {\n" <>
-      foldMap (\(ft, fn) -> prettyCType ft <> " " <> fn <> ";\n") fs <>
-      "}"
+      "struct " <> Pretty.textStrict n <> " " <>
+      Pretty.lbrace Pretty.<$>
+      Pretty.indent 4
+        (Pretty.vsep . Vector.toList $
+         fmap
+           (\(ft, fn) -> prettyCType ft <> " " <> Pretty.textStrict fn <> ";")
+           fs
+        ) Pretty.<$>
+      Pretty.rbrace
 
-prettyCDecls :: [CDecl] -> Text
+prettyCDecls :: [CDecl] -> Doc
 prettyCDecls =
   intersperseMap
-    "\n"
+    Pretty.line
     (\d ->
        (case d of
-          Typedef{} -> "\n"
-          Function{} -> "\n"
-          Struct{} -> "\n"
+          Typedef{} -> Pretty.line
+          Function{} -> Pretty.line
+          Struct{} -> Pretty.line
           _ -> mempty
        ) <>
        prettyCDecl d <>
