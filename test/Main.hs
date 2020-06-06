@@ -725,7 +725,6 @@ main =
             expectationFailure $
             "Expected success, got " <> show err
           Right code -> do
-            Text.putStrLn $ C.render (C.prettyCDecls code)
             code `shouldBe` output
       it "8" $ do
         let
@@ -817,3 +816,116 @@ main =
               (TypeM $ TName "List")
               (TypeM $ TApp (TName "Either") (TVar . Left $ TMeta 5))
           Right code -> expectationFailure $ "expected error, got " <> show code
+      it "10" $ do
+        let
+          input =
+            [ Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "Identity"
+              , Syntax.adtArgs = ["A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Identity" [TVar $ B 0] $
+                Syntax.End
+              }
+            , Syntax.DData $
+              Syntax.ADT
+              { Syntax.adtName = "List"
+              , Syntax.adtArgs = ["F", "A"]
+              , Syntax.adtCtors =
+                Syntax.Ctor "Nil" [] $
+                Syntax.Ctor "Cons"
+                  [ TApp (TVar $ B 0) (TVar $ B 1)
+                  , TApp TPtr $ foldl @[] TApp (TName "List") [TVar $ B 0, TVar $ B 1]
+                  ]
+                Syntax.End
+              }
+            , Syntax.DFunc $
+              Syntax.Function
+              { Syntax.funcName = "main"
+              , Syntax.funcTyArgs = []
+              , Syntax.funcArgs = []
+              , Syntax.funcRetTy = TInt32
+              , Syntax.funcBody =
+                  let
+                    e =
+                      Syntax.Call
+                        (Syntax.Name "Cons")
+                        [ Syntax.Call (Syntax.Name "Identity") [Syntax.Number 1]
+                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                        ]
+                  in
+                    Syntax.Let [("x", e)] $
+                    Syntax.Match (Syntax.Name "x") -- e
+                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
+                      , Syntax.Case "Cons" ["a", "b"] $
+                        Syntax.Project (Syntax.Var (B 0)) "0"
+                      ]
+              }
+            ]
+        case Compile.compile input of
+          Left err -> expectationFailure $ "expected success, got " <> show err
+          Right code -> do
+            let
+              output =
+                C.preamble <>
+                [ C.Typedef (C.Name "struct Identity_TInt32_t") "Identity_TInt32_t"
+                , C.Struct "Identity_TInt32_t" [(C.Int32,"_0")]
+
+                , C.Typedef (C.Name "struct List_Identity_TInt32_t") "List_Identity_TInt32_t"
+                , C.Struct "List_Identity_TInt32_t"
+                  [ (C.UInt8, "tag")
+                  , ( C.Union
+                      [ (C.TStruct [],"Nil")
+                      , ( C.TStruct
+                          [ (C.Name "Identity_TInt32_t","_0")
+                          , (C.Ptr (C.Name "List_Identity_TInt32_t"),"_1")
+                          ]
+                        ,"Cons"
+                        )
+                      ]
+                    , "data"
+                    )
+                  ]
+
+                , C.Function
+                    (C.Name "List_Identity_TInt32_t")
+                    "make_Cons_Identity_TInt32"
+                    [(C.Name "Identity_TInt32_t", "__0"), (C.Ptr $ C.Name "List_Identity_TInt32_t", "__1")]
+                    [ C.Declare (C.Name "List_Identity_TInt32_t") "__2" . Just $
+                      C.Init [C.Number 1, C.InitNamed [("Cons", C.Init [C.Var "__0", C.Var "__1"])]]
+                    , C.Return (C.Var "__2")
+                    ]
+
+                , C.Function (C.Name "List_Identity_TInt32_t") "make_Nil_Identity_TInt32" []
+                  [ C.Declare (C.Name "List_Identity_TInt32_t") "__3" . Just $
+                    C.Init [C.Number 0, C.InitNamed [("Nil", C.Init [])]]
+                  , C.Return (C.Var "__3")
+                  ]
+
+                , C.Function C.Int32 "main" []
+                  [ C.Declare (C.Ptr $ C.Name "List_Identity_TInt32_t") "__4" . Just $
+                    C.Cast (C.Ptr $ C.Name "List_Identity_TInt32_t") (C.Malloc $ C.Number 13)
+                  , C.Assign (C.Deref (C.Var "__4")) $ C.Call (C.Var "make_Nil_Identity_TInt32") []
+
+                  , C.Declare (C.Name "List_Identity_TInt32_t") "__5" . Just $
+                    C.Call (C.Var "make_Cons_Identity_TInt32") [C.Number 1, C.Var "__4"]
+
+                  , C.Declare C.Int32 "__6" Nothing
+
+                  , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 0))
+                    [ C.Assign (C.Var "__6") (C.Number 0)
+                    ]
+
+                  , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 1))
+                    [ C.Assign (C.Var "__6") (C.Project (C.Project (C.Project (C.Var "__5") "data") "Cons") "_0")
+                    ]
+
+                  , C.Return $ C.Var "__6"
+                  ]
+                ]
+            case Compile.compile input of
+              Left err ->
+                expectationFailure $
+                "Expected success, got " <> show err
+              Right code -> do
+                code `shouldBe` output
