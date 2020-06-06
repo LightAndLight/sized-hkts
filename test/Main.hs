@@ -923,9 +923,4 @@ main =
                   , C.Return $ C.Var "__6"
                   ]
                 ]
-            case Compile.compile input of
-              Left err ->
-                expectationFailure $
-                "Expected success, got " <> show err
-              Right code -> do
-                code `shouldBe` output
+            code `shouldBe` output

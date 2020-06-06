@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
@@ -26,7 +27,7 @@ import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad (guard)
-import Control.Monad.Except (MonadError, runExceptT, throwError)
+import Control.Monad.Except (MonadError, runExcept, throwError)
 import Control.Monad.State (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Bifunctor (first)
@@ -53,7 +54,7 @@ data Theory ty
   = Theory
   { _thGlobal :: Map (Constraint Void) (Size Void)
   , _thLocal :: Map (Constraint ty) SMeta
-  }
+  } deriving Show
 makeLenses ''Theory
 
 theoryToList :: Theory ty -> [(Size (Either SMeta sz), Constraint ty)]
@@ -70,7 +71,7 @@ instance HasGlobalTheory (Theory ty) where
   globalTheory = thGlobal
 
 insertLocal :: Ord ty => Constraint ty -> SMeta -> Theory ty -> Theory ty
-insertLocal k v (Theory gbl lcl) = Theory gbl (Map.insert k v lcl)
+insertLocal k v (Theory gbl lcl) = Theory gbl $! Map.insert k v lcl
 
 mapTy :: Ord ty' => (ty -> ty') -> Theory ty -> Theory ty'
 mapTy f (Theory gbl lcl) = Theory gbl (Map.mapKeys (fmap f) lcl)
@@ -173,10 +174,14 @@ entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
     CSized t ->
       case cons of
         CSized t' -> do
-          res <- runExceptT $ unifyType kindScope tyNames kinds (TypeM t') (TypeM t)
+          st <- get
+          let res = runExcept $ runStateT (unifyType kindScope tyNames kinds (TypeM t') (TypeM t)) st
           case res of
-            Left{} -> empty
-            Right () -> pure ([], Map.singleton consVar antSize)
+            Left{} -> do
+              empty
+            Right ((), st') -> do
+              put st'
+              pure ([], Map.singleton consVar antSize)
         _ -> error "consequent not simple enough"
 
 simplify ::
@@ -195,19 +200,24 @@ simplify ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta sz))
     )
-simplify kindScope tyNames kinds theory (consVar, cons) =
+simplify kindScope tyNames kinds !theory (consVar, cons) =
   case cons of
     CForall m_n k a -> do
       ameta <- freshSMeta
       es <- get
       ((aAssumes, asubs), es') <-
-        flip runStateT (mapTypes F es) $
-        simplify
-          kindScope
-          (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
-          (unvar (\() -> k) kinds)
-          (mapTy (fmap F) theory)
-          (ameta, sequence <$> a)
+        flip runStateT (mapTypes F es) $ do
+          (aAssumes, asubs) <-
+            simplify
+              kindScope
+              (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
+              (unvar (\() -> k) kinds)
+              (mapTy (fmap F) theory)
+              (ameta, sequence <$> a)
+          -- solve metas now, because any solutions that involve skolem variables
+          -- will be filtered out by `filterTypes`
+          aAssumes' <- (traverse.traverse) solveMetas_Constraint aAssumes
+          pure (aAssumes', asubs)
       put $ filterTypes (unvar (\() -> Nothing) Just) es'
       pure
         ( (fmap.fmap) (CForall m_n k . fmap sequence) aAssumes
@@ -219,7 +229,7 @@ simplify kindScope tyNames kinds theory (consVar, cons) =
       (bAssumes, bsubs) <- simplify kindScope tyNames kinds (insertLocal a ameta theory) (bmeta, b)
       bAssumes' <- traverse (\assume -> (, assume) <$> freshSMeta) bAssumes
       pure
-        ( (\(v, (_, c)) -> (v, c)) <$> bAssumes'
+        ( (\(v, (_, c)) -> (v, CImplies a c)) <$> bAssumes'
         , Map.singleton consVar $
           Lam
             (abstract (either (guard . (ameta ==)) (const Nothing)) $

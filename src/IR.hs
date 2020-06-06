@@ -291,6 +291,7 @@ data Declaration
   = DData Datatype
   | DCtor Constructor
   | DFunc Function
+  deriving Show
 
 declOrigin :: Declaration -> Origin
 declOrigin d =

@@ -320,11 +320,11 @@ genExpr vars expr =
     IR.BTrue -> pure C.BTrue
     IR.BFalse -> pure C.BFalse
     IR.New a t -> do
-      a' <- genExpr vars a
       kindScope <- use codeKinds
       global <- use codeGlobalTheory
       let
-        size = sizeOfType kindScope global t
+        !size = sizeOfType kindScope global t
+      a' <- genExpr vars a
       pt <- C.Ptr <$> genType t
       n1 <- freshName
       tell
