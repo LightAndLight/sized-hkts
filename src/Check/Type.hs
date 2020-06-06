@@ -104,7 +104,7 @@ inferPattern ctorName argNames = do
       case expectedLength == actualLength of
         False -> throwError $ CtorArityMismatch ctorName expectedLength actualLength
         True -> do
-          tyArgs <- traverse (\_ -> freshTMeta KType) $ IR.ctorTyArgs ctor
+          tyArgs <- traverse (\(_, k) -> freshTMeta k) $ IR.ctorTyArgs ctor
           let inst = fmap $ unvar (Left . (tyArgs Vector.!)) absurd
           pure
             ( TypeM . inst . snd <$> IR.ctorArgs ctor
