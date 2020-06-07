@@ -1,6 +1,7 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language FlexibleContexts #-}
 {-# language OverloadedLists, OverloadedStrings #-}
+{-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 {-# language TypeApplications #-}
 module IR where
@@ -9,8 +10,8 @@ import Bound.Var (Var(..), unvar)
 import Control.Lens.Setter (over, mapped)
 import Control.Lens.Tuple (_1)
 import Data.Bifunctor (bimap)
-import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1, deriveEq2, deriveShow2)
-import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, compare1, showsPrec1)
+import Data.Deriving (deriveEq1, deriveShow1, deriveEq2, deriveShow2)
+import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, showsPrec1)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
@@ -128,10 +129,9 @@ data Constraint a
   | CImplies (Constraint a) (Constraint a)
   deriving (Functor, Foldable, Traversable)
 deriveEq1 ''Constraint
-deriveOrd1 ''Constraint
 deriveShow1 ''Constraint
 instance Eq a => Eq (Constraint a) where; (==) = eq1
-instance Ord a => Ord (Constraint a) where; compare = compare1
+deriving instance Ord a => Ord (Constraint a)
 instance Show a => Show (Constraint a) where; showsPrec = showsPrec1
 
 bindConstraint :: (a -> Type b) -> Constraint a -> Constraint b

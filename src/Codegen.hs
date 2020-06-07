@@ -6,6 +6,7 @@
 {-# language ViewPatterns #-}
 module Codegen
   ( Code
+  , Key(..)
   , emptyCode
   , codeKinds
   , codeDatatypeCtors
@@ -21,8 +22,8 @@ import Bound.Var (unvar)
 import Control.Lens.Getter (use, uses)
 import Control.Lens.Setter ((.=), (%=))
 import Control.Lens.TH (makeLenses)
-import Control.Monad.State (MonadState, evalStateT)
-import Control.Monad.Writer (WriterT, runWriterT, tell)
+import Control.Monad.State.Strict (MonadState, evalStateT)
+import Control.Monad.Writer.Strict (WriterT, runWriterT, tell)
 import Data.Foldable (fold, foldrM, traverse_)
 import qualified Data.List as List
 import Data.Map (Map)
@@ -44,6 +45,9 @@ import Size (Size)
 import qualified Size
 import qualified Syntax
 
+data Key = Key IR.Origin Text (Vector (Syntax.Type Void))
+  deriving (Eq, Ord, Show)
+
 data Code
   = Code
   { _codeKinds :: Map Text IR.Kind
@@ -52,7 +56,7 @@ data Code
   , _codeDatatypeCtors :: Map Text IR.Constructor
   , _codeCompiledNames ::
       Map
-        (IR.Origin, Text, Vector (Syntax.Type Void))
+        Key -- (IR.Origin, Text, Vector (Syntax.Type Void))
         (Text, Maybe [CDecl]) -- 'Nothing' indicates that this code is currently being compiled
   , _codeSupply :: Int
   }
@@ -108,7 +112,8 @@ genType ty =
       Syntax.TInt32 -> pure C.Int32
       Syntax.TBool -> pure C.Bool
       Syntax.TName name -> do
-        let key = (IR.ODatatype, name, ts)
+        -- let key = (IR.ODatatype, name, ts)
+        let key = Key IR.ODatatype name ts
         m_code <- uses codeCompiledNames $ Map.lookup key
         name' <-
           case m_code of
@@ -214,7 +219,8 @@ genInst ::
   Vector (Syntax.Type Void) ->
   m CExpr
 genInst name ts = do
-  let key = (IR.OFunction, name, ts)
+  -- let key = (IR.OFunction, name, ts)
+  let key = Key IR.OFunction name ts
   m_code <- uses codeCompiledNames $ Map.lookup key
   name' <-
     case m_code of
@@ -241,7 +247,8 @@ genCtor ::
   Vector (Syntax.Type Void) ->
   m CExpr
 genCtor name ts = do
-  let key = (IR.OConstructor, name, ts)
+  -- let key = (IR.OConstructor, name, ts)
+  let key = Key IR.OConstructor name ts
   m_code <- uses codeCompiledNames $ Map.lookup key
   name' <-
     case m_code of
@@ -292,7 +299,7 @@ genExpr ::
   (tm -> CExpr) ->
   IR.Expr Void tm ->
   WriterT [CStatement] m CExpr
-genExpr vars expr =
+genExpr vars expr = do
   case expr of
     IR.Var a -> pure $ vars a
     IR.Name n -> pure $ C.Var n
@@ -322,8 +329,8 @@ genExpr vars expr =
     IR.New a t -> do
       kindScope <- use codeKinds
       global <- use codeGlobalTheory
-      let
-        !size = sizeOfType kindScope global t
+      let !size = sizeOfType kindScope global t
+
       a' <- genExpr vars a
       pt <- C.Ptr <$> genType t
       n1 <- freshName

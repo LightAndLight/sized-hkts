@@ -7,7 +7,7 @@ import Bound.Scope (toScope)
 import Bound.Var (Var(..))
 import Control.Lens.Setter ((.~))
 import Control.Monad.Except (runExceptT)
-import Control.Monad.State (evalState, evalStateT)
+import Control.Monad.State.Strict (evalState, evalStateT)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Function ((&))
 import qualified Data.Map as Map
@@ -854,8 +854,7 @@ main =
                         , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
                         ]
                   in
-                    Syntax.Let [("x", e)] $
-                    Syntax.Match (Syntax.Name "x") -- e
+                    Syntax.Match e
                       [ Syntax.Case "Nil" [] $ Syntax.Number 0
                       , Syntax.Case "Cons" ["a", "b"] $
                         Syntax.Project (Syntax.Var (B 0)) "0"
@@ -896,31 +895,38 @@ main =
                     , C.Return (C.Var "__2")
                     ]
 
+                , C.Function (C.Name "Identity_TInt32_t") "make_Identity_TInt32" [(C.Int32, "__3")]
+                  [ C.Declare (C.Name "Identity_TInt32_t") "__4" . Just $ C.Init [C.Var "__3"]
+                  , C.Return (C.Var "__4")
+                  ]
+
                 , C.Function (C.Name "List_Identity_TInt32_t") "make_Nil_Identity_TInt32" []
-                  [ C.Declare (C.Name "List_Identity_TInt32_t") "__3" . Just $
+                  [ C.Declare (C.Name "List_Identity_TInt32_t") "__5" . Just $
                     C.Init [C.Number 0, C.InitNamed [("Nil", C.Init [])]]
-                  , C.Return (C.Var "__3")
+                  , C.Return (C.Var "__5")
                   ]
 
                 , C.Function C.Int32 "main" []
-                  [ C.Declare (C.Ptr $ C.Name "List_Identity_TInt32_t") "__4" . Just $
+                  [ C.Declare (C.Ptr $ C.Name "List_Identity_TInt32_t") "__6" . Just $
                     C.Cast (C.Ptr $ C.Name "List_Identity_TInt32_t") (C.Malloc $ C.Number 13)
-                  , C.Assign (C.Deref (C.Var "__4")) $ C.Call (C.Var "make_Nil_Identity_TInt32") []
+                  , C.Assign (C.Deref (C.Var "__6")) $ C.Call (C.Var "make_Nil_Identity_TInt32") []
 
-                  , C.Declare (C.Name "List_Identity_TInt32_t") "__5" . Just $
-                    C.Call (C.Var "make_Cons_Identity_TInt32") [C.Number 1, C.Var "__4"]
+                  , C.Declare (C.Name "List_Identity_TInt32_t") "__7" . Just $
+                    C.Call (C.Var "make_Cons_Identity_TInt32")
+                      [C.Call (C.Var "make_Identity_TInt32") [C.Number 1], C.Var "__6"]
 
-                  , C.Declare C.Int32 "__6" Nothing
+                  , C.Declare C.Int32 "__8" Nothing
 
-                  , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 0))
-                    [ C.Assign (C.Var "__6") (C.Number 0)
+                  , C.If (C.Eq (C.Project (C.Var "__7") "tag") (C.Number 0))
+                    [ C.Assign (C.Var "__8") (C.Number 0)
                     ]
 
-                  , C.If (C.Eq (C.Project (C.Var "__5") "tag") (C.Number 1))
-                    [ C.Assign (C.Var "__6") (C.Project (C.Project (C.Project (C.Var "__5") "data") "Cons") "_0")
+                  , C.If (C.Eq (C.Project (C.Var "__7") "tag") (C.Number 1))
+                    [ C.Assign (C.Var "__8") $
+                      C.Project (C.Project (C.Project (C.Project (C.Var "__7") "data") "Cons") "_0") "_0"
                     ]
 
-                  , C.Return $ C.Var "__6"
+                  , C.Return $ C.Var "__8"
                   ]
                 ]
             code `shouldBe` output

@@ -1,6 +1,7 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
+{-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 module Syntax where
 
@@ -8,9 +9,9 @@ import Bound.TH (makeBound)
 import Bound.Var (Var(..), unvar)
 import Control.Monad (ap)
 import Control.Monad.Except (ExceptT(..), runExceptT)
-import Data.Deriving (deriveEq1, deriveOrd1, deriveShow1)
+import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Foldable (fold)
-import Data.Functor.Classes (eq1, compare1, showsPrec1)
+import Data.Functor.Classes (eq1, showsPrec1)
 import qualified Data.List as List
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -27,10 +28,9 @@ data Type a
   deriving (Functor, Foldable, Traversable)
 makeBound ''Type
 deriveEq1 ''Type
-deriveOrd1 ''Type
 deriveShow1 ''Type
 instance Eq a => Eq (Type a) where; (==) = eq1
-instance Ord a => Ord (Type a) where; compare = compare1
+deriving instance Ord a => Ord (Type a)
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
 
 unApply :: Type a -> (Type a, [Type a])

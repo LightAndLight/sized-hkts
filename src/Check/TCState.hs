@@ -50,7 +50,7 @@ data TCState ty
   , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
   , _tcsDatatypeFields :: Map Text IR.Fields
   , _tcsDatatypeCtors :: Map Text IR.Constructor
-  }
+  } deriving Show
 makeLenses ''TCState
 
 emptyTCState :: Ord ty => TCState ty

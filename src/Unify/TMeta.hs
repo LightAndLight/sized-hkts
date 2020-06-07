@@ -14,7 +14,7 @@ import Bound.Var (Var(..))
 import Control.Lens.Getter (use)
 import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((.=), (%=))
-import Control.Monad.State (MonadState)
+import Control.Monad.State.Strict (MonadState)
 import Data.Bitraversable (bitraverse)
 import Data.Map (Map)
 import qualified Data.Map as Map

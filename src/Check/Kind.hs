@@ -7,7 +7,7 @@ module Check.Kind
 where
 
 import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.State (MonadState)
+import Control.Monad.State.Strict (MonadState)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)

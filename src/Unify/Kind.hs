@@ -3,7 +3,7 @@ module Unify.Kind (unifyKind) where
 
 import Control.Lens.Setter ((%=))
 import Control.Monad.Except (MonadError, throwError)
-import Control.Monad.State (MonadState)
+import Control.Monad.State.Strict (MonadState)
 import qualified Data.Map as Map
 import Data.Monoid (Any(..))
 
