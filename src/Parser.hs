@@ -85,15 +85,22 @@ iter state =
     j = byteOffset state
     k = j +# 1#
 
+data Label
+  = Named Text
+  | Char Char
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData Label
+
 data ParseError
-  = Unexpected Int (Set Char) Bool
+  = Unexpected Int (Set Label) Bool
   | Empty
   deriving (Eq, Show, Generic)
 
 instance NFData ParseError
 
 type Consumed = Int#
-type StartSet = (# [Char], Bool #)
+type StartSet = (# [Label], Bool #)
 type Nullable = Int#
 
 newtype Parser a
@@ -179,7 +186,7 @@ char :: Char -> Parser ()
 char c =
   Parser $
   \(# (# ss, expectsEof #), state #) ->
-  let ss' = c : ss in
+  let ss' = Char c : ss in
   case (<=#) (byteOffset state) (byteLength state) of
     1# ->
       case iter state of
@@ -211,3 +218,21 @@ eof =
       (# 0#, 1#, (# ss, True #) , (# Unexpected (I# (charOffset state)) (Set.fromList ss) True | #) #)
     _ ->
       (# 0#, 1#, (# ss, True #), (# | (# state, () #) #) #)
+
+infixl 4 <?>
+(<?>) :: Parser a -> Text -> Parser a
+(<?>) (Parser p) name =
+  Parser $ \(# (# ss, expectsEof #), state #) ->
+  case p (# (# ss, expectsEof #), state #) of
+    (# consumed, nullable, _, output #) ->
+      let
+        ss' = Named name : ss
+      in
+        (# consumed
+        , nullable
+        , (# ss', expectsEof #)
+        , case output of
+            (# Unexpected pos _ _ | #) ->
+              (# Unexpected pos (Set.fromList ss') expectsEof | #)
+            _ -> output
+        #)
