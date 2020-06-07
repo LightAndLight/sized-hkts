@@ -69,6 +69,7 @@ executable parser-benchmarks
   main-is:             Main.hs
   build-depends:       base ^>=4.12.0.0
                      , sized-hkts
+                     , attoparsec
                      , deepseq
                      , criterion
                      , megaparsec
