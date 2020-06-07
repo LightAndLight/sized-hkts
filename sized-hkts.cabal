@@ -41,7 +41,9 @@ library
                      , wl-pprint-text
                      , bifunctors
                      , bound
+                     , charset
                      , containers >=0.6
+                     , deepseq
                      , deriving-compat
                      , lens
                      , mtl
@@ -61,14 +63,28 @@ executable sized-hkts
   hs-source-dirs:      app
   default-language:    Haskell2010
 
+executable parser-benchmarks
+  default-language:    Haskell2010
+  hs-source-dirs:      bench
+  main-is:             Main.hs
+  build-depends:       base ^>=4.12.0.0
+                     , sized-hkts
+                     , deepseq
+                     , criterion
+                     , megaparsec
+                     , text
+  -- ghc-options:         -fprof-auto
+
 test-suite sized-hkts-test
   default-language:    Haskell2010
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Main.hs
+  other-modules:       Test.Parser
   build-depends:       base ^>=4.12.0.0
                      , sized-hkts
                      , bound
+                     , charset
                      , containers >= 0.6
                      , hspec
                      , lens
