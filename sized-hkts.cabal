@@ -29,6 +29,7 @@ library
                      , Compile
                      , Error.TypeError
                      , IR
+                     , Parser
                      , Size
                      , Size.Builtins
                      , Syntax
