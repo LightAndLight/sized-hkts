@@ -13,19 +13,19 @@ import Data.Text.Internal (Text(Text))
 import Data.Text.Internal.Encoding.Utf16 (chr2)
 import Data.Text.Internal.Unsafe.Char (unsafeChr)
 import GHC.Exts
-  ( ByteArray#, Int#, Word#
-  , (<#), (>#)
-  , andI#, indexWord16Array#, int2Word#
-  , leWord#, orI#, plusWord#, word2Int#
+  ( ByteArray#, Int#
+  , (<#), (<=#), (>#), (+#)
+  , andI#, indexWord16Array#
+  , orI#, word2Int#
   )
 import GHC.Generics (Generic)
 import GHC.Int (Int(I#))
-import GHC.Word (Word16(W16#), Word64(W64#))
+import GHC.Word (Word16(W16#))
 
 type Input = ByteArray#
-type ByteOffset = Word#
-type CharOffset = Word#
-type ByteLength = Word#
+type ByteOffset = Int#
+type CharOffset = Int#
+type ByteLength = Int#
 
 type State = (# Input, ByteOffset, ByteLength, CharOffset #)
 
@@ -47,47 +47,48 @@ byteOffset :: State -> ByteOffset
 byteOffset (# _, bo, _, _ #) = bo
 
 {-# inline addByteOffset #-}
-addByteOffset :: Word# -> State -> State
-addByteOffset n (# i, bo, bl, co #) = (# i, plusWord# n bo, bl, co #)
+addByteOffset :: Int# -> State -> State
+addByteOffset n (# i, bo, bl, co #) = (# i, n +# bo, bl, co #)
 
 {-# inline charOffset #-}
 charOffset :: State -> CharOffset
 charOffset (# _, _, _, co #) = co
 
 {-# inline addCharOffset #-}
-addCharOffset :: Word# -> State -> State
-addCharOffset n (# i, bo, bl, co #) = (# i, bo, bl, plusWord# n co #)
+addCharOffset :: Int# -> State -> State
+addCharOffset n (# i, bo, bl, co #) = (# i, bo, bl, n +# co #)
 
 {-# inline addByteCharOffset #-}
-addByteCharOffset :: Word# -> Word# -> State -> State
-addByteCharOffset m n (# i, bo, bl, co #) = (# i, plusWord# m bo, bl, plusWord# n co #)
+addByteCharOffset :: Int# -> Int# -> State -> State
+addByteCharOffset m n (# i, bo, bl, co #) = (# i, m +# bo, bl, n +# co #)
 
 {-# inline byteLength #-}
 byteLength :: State -> ByteLength
 byteLength (# _, _, bl, _ #) = bl
 
 -- | Ported from Data.Text.Unsafe
+{-# inline iter #-}
 iter :: State -> (# Char, State #)
 iter state =
   case orI# ((<#) (word2Int# m) 0xD800#) ((>#) (word2Int# m) 0xDBFF#) of
     0# ->
       (# chr2 (W16# m) (W16# n)
       -- , addCharOffset (int2Word# 1#) (addByteOffset (int2Word# 2#) state)
-      , addByteCharOffset (int2Word# 2#) (int2Word# 1#) state
+      , addByteCharOffset 2# 1# state
       #)
     _ ->
       (# unsafeChr (W16# m)
       -- , addCharOffset (int2Word# 1#) (addByteOffset (int2Word# 1#) state)
-      , addByteCharOffset (int2Word# 1#) (int2Word# 1#) state
+      , addByteCharOffset 1# 1# state
       #)
   where
-    m = indexWord16Array# (input state) (word2Int# j)
-    n = indexWord16Array# (input state) (word2Int# k)
+    m = indexWord16Array# (input state) j
+    n = indexWord16Array# (input state) k
     j = byteOffset state
-    k = j `plusWord#` int2Word# 1#
+    k = j +# 1#
 
 data ParseError
-  = Unexpected Word64 (Set Char) Bool
+  = Unexpected Int (Set Char) Bool
   | Empty
   deriving (Eq, Show, Generic)
 
@@ -109,7 +110,7 @@ newtype Parser a
 
 parse :: Parser a -> Text -> Either ParseError a
 parse (Parser p) (Text (Array arr) (I# off) (I# len)) =
-  case p (# (# Set.empty, False #), makeState arr (int2Word# off) (int2Word# len) (int2Word# 0#) #) of
+  case p (# (# Set.empty, False #), makeState arr off len 0# #) of
     (# (# _, _, _, e #) | #) -> Left e
     (# | (# _, _, _, _, res #) #) -> Right res
 
@@ -123,6 +124,7 @@ instance Functor Parser where
 
 instance Applicative Parser where
   pure a = Parser $ \(# ss, state #) -> (# | (# 0#, 1#, ss, state, a #) #)
+  {-# inline (<*>) #-}
   Parser pf <*> Parser pa =
     Parser $ \(# ss, state #) ->
     case pf (# ss, state #) of
@@ -136,6 +138,7 @@ instance Applicative Parser where
 
 instance Alternative Parser where
   empty = Parser $ \_ -> (# (# 0#, 0#, (# Set.empty, False #), Empty #) | #)
+  {-# inline (<|>) #-}
   Parser pa <|> Parser pb =
     Parser $ \(# ss, state #) ->
     case pa (# ss, state #) of
@@ -171,13 +174,13 @@ char c =
   let
     !ss' = Set.insert c ss
   in
-    case leWord# (byteOffset state) (byteLength state) of
+    case (<=#) (byteOffset state) (byteLength state) of
       1# ->
         case iter state of
           (# c', state' #) ->
             case c == c' of
               False ->
-                (# (# 0#, 0#, (# ss', expectsEof #), Unexpected (W64# (charOffset state)) ss' expectsEof #) | #)
+                (# (# 0#, 0#, (# ss', expectsEof #), Unexpected (I# (charOffset state)) ss' expectsEof #) | #)
               True ->
                 (# |
                   (# 1#
@@ -187,7 +190,7 @@ char c =
                   , ()
                   #)
                 #)
-      _ -> (# (# 0#, 0#, (# ss', expectsEof #), Unexpected (W64# (charOffset state)) ss' expectsEof #) | #)
+      _ -> (# (# 0#, 0#, (# ss', expectsEof #), Unexpected (I# (charOffset state)) ss' expectsEof #) | #)
 
 try :: Parser a -> Parser a
 try (Parser p) =
@@ -203,6 +206,6 @@ eof :: Parser ()
 eof =
   Parser $
   \(# (# ss, _ #), state #) ->
-  case leWord# (byteOffset state) (byteLength state) of
-    1# -> (# (# 0#, 1#, (# ss, True #) , Unexpected (W64# (charOffset state)) ss True #) | #)
+  case (<=#) (byteOffset state) (byteLength state) of
+    1# -> (# (# 0#, 1#, (# ss, True #) , Unexpected (I# (charOffset state)) ss True #) | #)
     _ -> (# | (# 0#, 1#, (# ss, True #), state, () #) #)
