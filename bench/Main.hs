@@ -12,6 +12,8 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import System.Environment (getArgs, withArgs)
+import Weigh
 
 import qualified Parser
 import qualified Data.Attoparsec.Text as Attoparsec
@@ -115,23 +117,29 @@ main = do
   print $ parseLambda "x y"
   print $ parseLambda "\\x -> y"
   print $ parseLambda "x (\\y -> z)"
-    {-
-  count <- newIORef 0
-  replicateM_ 10000000 $ do
-    let
-      a = parseLambdaMP "x (\\y -> z)"
-      () = rnf a
-    modifyIORef count (+1)
-  print =<< readIORef count
--}
-  defaultMain
-    [ bench "sage x (\\y -> z)" $ nf parseLambda "x (\\y -> z)"
-    , bench "megaparsec x (\\y -> z)" $ nf parseLambdaMP "x (\\y -> z)"
-    , bench "attoparsec x (\\y -> z)" $ nf parseLambdaAP "x (\\y -> z)"
-    , bench "sage x (\\y -> a b c d e)" $ nf parseLambda "x (\\y -> a b c d e)"
-    , bench "megaparsec x (\\y -> a b c d e)" $ nf parseLambdaMP "x (\\y -> a b c d e)"
-    , bench "attoparsec x (\\y -> a b c d e)" $ nf parseLambdaAP "x (\\y -> a b c d e)"
-    , bench "sage x (\\y -> a b c d ~)" $ nf parseLambda "x (\\y -> a b c d ~)"
-    , bench "megaparsec x (\\y -> a b c d ~)" $ nf parseLambdaMP "x (\\y -> a b c d ~)"
-    , bench "attoparsec x (\\y -> a b c d ~)" $ nf parseLambdaAP "x (\\y -> a b c d ~)"
-    ]
+  benchtype:args <- getArgs
+  case benchtype of
+    "memory" ->
+      mainWith $ do
+        func "sage x (\\y -> z)" parseLambda "x (\\y -> z)"
+        func "megaparsec x (\\y -> z)" parseLambdaMP "x (\\y -> z)"
+        func "attoparsec x (\\y -> z)" parseLambdaAP "x (\\y -> z)"
+        func "sage x (\\y -> a b c d e)" parseLambda "x (\\y -> a b c d e)"
+        func "megaparsec x (\\y -> a b c d e)" parseLambdaMP "x (\\y -> a b c d e)"
+        func "attoparsec x (\\y -> a b c d e)" parseLambdaAP "x (\\y -> a b c d e)"
+        func "sage x (\\y -> a b c d ~)" parseLambda "x (\\y -> a b c d ~)"
+        func "megaparsec x (\\y -> a b c d ~)" parseLambdaMP "x (\\y -> a b c d ~)"
+        func "attoparsec x (\\y -> a b c d ~)" parseLambdaAP "x (\\y -> a b c d ~)"
+    "time" ->
+      withArgs args $
+      defaultMain
+        [ bench "sage x (\\y -> z)" $ nf parseLambda "x (\\y -> z)"
+        , bench "megaparsec x (\\y -> z)" $ nf parseLambdaMP "x (\\y -> z)"
+        , bench "attoparsec x (\\y -> z)" $ nf parseLambdaAP "x (\\y -> z)"
+        , bench "sage x (\\y -> a b c d e)" $ nf parseLambda "x (\\y -> a b c d e)"
+        , bench "megaparsec x (\\y -> a b c d e)" $ nf parseLambdaMP "x (\\y -> a b c d e)"
+        , bench "attoparsec x (\\y -> a b c d e)" $ nf parseLambdaAP "x (\\y -> a b c d e)"
+        , bench "sage x (\\y -> a b c d ~)" $ nf parseLambda "x (\\y -> a b c d ~)"
+        , bench "megaparsec x (\\y -> a b c d ~)" $ nf parseLambdaMP "x (\\y -> a b c d ~)"
+        , bench "attoparsec x (\\y -> a b c d ~)" $ nf parseLambdaAP "x (\\y -> a b c d ~)"
+        ]

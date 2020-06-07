@@ -74,6 +74,7 @@ executable parser-benchmarks
                      , criterion
                      , megaparsec
                      , text
+                     , weigh == 0.0.16
   -- ghc-options:         -fprof-auto
 
 test-suite sized-hkts-test
