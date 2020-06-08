@@ -165,19 +165,20 @@ iter (# input, state #) =
 data Label
   = Named Text
   | Char Char
+  | Eof
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData Label
 
 data ParseError
-  = Unexpected Int (Set Label) Bool
+  = Unexpected Int (Set Label)
   | Empty
   deriving (Eq, Show, Generic)
 
 instance NFData ParseError
 
 type Consumed = Int#
-type ExpectedSet = (# Set Label, Bool #)
+type ExpectedSet = Set Label
 
 newtype Parser s a
   = Parser
@@ -199,7 +200,7 @@ parse (Parser p) (Text (Array arr) (I# off) (I# len)) =
     run s =
       case newMState (# off, len, 0# #) s of
         (# s', mstate #) ->
-          p (# (# mempty, False #), arr, mstate, s' #)
+          p (# mempty, arr, mstate, s' #)
 
 instance Functor (Parser s) where
   fmap f (Parser p) =
@@ -235,7 +236,7 @@ instance Applicative (Parser s) where
                     (# s'', orI# consumed consumed', es'', (# | f a #) #)
 
 instance Alternative (Parser s) where
-  empty = Parser $ \(# _, _, _, s #) -> (# s, 0#, (# mempty, False #), (# Empty | #) #)
+  empty = Parser $ \(# _, _, _, s #) -> (# s, 0#, mempty, (# Empty | #) #)
   {-# inline (<|>) #-}
   Parser pa <|> Parser pb =
     Parser $ \(# es, input, state, s #) ->
@@ -267,7 +268,7 @@ instance Monad (Parser s) where
 char :: Char -> Parser s ()
 char c =
   Parser $
-  \(# (# es, expectsEof #), input, state, s #) ->
+  \(# es, input, state, s #) ->
   let es' = Char c `Set.insert` es in
   case readState state s of
     (# s', state_ #) ->
@@ -279,22 +280,22 @@ char c =
                 False ->
                   (# s'
                   , 0#
-                  , (# es', expectsEof #)
-                  , (# Unexpected (I# (charOffset state_)) (es') expectsEof | #)
+                  , es'
+                  , (# Unexpected (I# (charOffset state_)) es' | #)
                   #)
                 True ->
                   case writeState state state_' s' of
                     s'' ->
                       (# s''
                       , 1#
-                      , (# mempty, False #)
+                      , mempty
                       , (# | () #)
                       #)
         _ ->
           (# s'
           , 0#
-          , (# es', expectsEof #)
-          , (# Unexpected (I# (charOffset state_)) (es') expectsEof | #)
+          , es'
+          , (# Unexpected (I# (charOffset state_)) es' | #)
           #)
 
 try :: Parser s a -> Parser s a
@@ -310,30 +311,33 @@ try (Parser p) =
 eof :: Parser s ()
 eof =
   Parser $
-  \(# (# es, _ #), _, state, s #) ->
+  \(# es, _, state, s #) ->
   case readState state s of
     (# s', state_ #) ->
-      case (<#) (byteOffset state_) (byteLength state_) of
-        1# ->
-          (# s', 0#, (# es, True #) , (# Unexpected (I# (charOffset state_)) (es) True | #) #)
-        _ ->
-          (# s', 0#, (# es, True #), (# | () #) #)
+      let
+        es' = Set.insert Eof es
+      in
+        case (<#) (byteOffset state_) (byteLength state_) of
+          1# ->
+            (# s', 0#, es', (# Unexpected (I# (charOffset state_)) es' | #) #)
+          _ ->
+            (# s', 0#, es', (# | () #) #)
 
 infixl 4 <?>
 (<?>) :: Parser s a -> Text -> Parser s a
 (<?>) (Parser p) name =
-  Parser $ \(# (# es, expectsEof #), input, state, s #) ->
-  case p (# (# es, expectsEof #), input, state, s #) of
+  Parser $ \(# es, input, state, s #) ->
+  case p (# es, input, state, s #) of
     (# s', consumed, _, output #) ->
       let
         es' = Named name `Set.insert` es
       in
         (# s'
         , consumed
-        , (# es', expectsEof #)
+        , es'
         , case output of
-            (# Unexpected pos _ _ | #) ->
-              (# Unexpected pos (es') expectsEof | #)
+            (# Unexpected pos _ | #) ->
+              (# Unexpected pos es' | #)
             _ -> output
         #)
 
