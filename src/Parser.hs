@@ -17,7 +17,7 @@ import Data.Text.Internal.Encoding.Utf16 (chr2)
 import Data.Text.Internal.Unsafe.Char (unsafeChr)
 import GHC.Exts
   ( ByteArray#, Int#, MutableByteArray#, State#, RealWorld
-  , (<#), (<=#), (>#), (+#), (*#)
+  , (<#), (>#), (+#), (*#)
   , indexWord16Array#
   , newByteArray#, readWord8ArrayAsInt#, writeWord8ArrayAsInt#
   , orI#, word2Int#
@@ -251,7 +251,7 @@ char c =
   let es' = Char c `Set.insert` es in
   case readState state s of
     (# s', state_ #) ->
-      case (<=#) (byteOffset state_) (byteLength state_) of
+      case (<#) (byteOffset state_) (byteLength state_) of
         1# ->
           case iter (# input, state_ #) of
             (# c', state_' #) ->
@@ -293,7 +293,7 @@ eof =
   \(# (# es, _ #), _, state, s #) ->
   case readState state s of
     (# s', state_ #) ->
-      case (<=#) (byteOffset state_) (byteLength state_) of
+      case (<#) (byteOffset state_) (byteLength state_) of
         1# ->
           (# s', 0#, (# es, True #) , (# Unexpected (I# (charOffset state_)) (es) True | #) #)
         _ ->

@@ -1,11 +1,11 @@
 {-# language OverloadedStrings #-}
 module Test.Parser (parserTests) where
 
-import Control.Applicative ((<|>), some)
+import Control.Applicative ((<|>), some, many)
 import Test.Hspec
 import qualified Data.Set as Set
 
-import Parser (Label(..), ParseError(..), (<?>), parse, char)
+import Parser (Label(..), ParseError(..), (<?>), parse, char, eof)
 
 parserTests :: Spec
 parserTests =
@@ -79,3 +79,27 @@ parserTests =
         input = "(xxy"
         output = Left (Unexpected 3 (Set.fromList [Char ')', Char 'x']) False)
       parse (char '(' *> some (char 'x') <* char ')') input `shouldBe` output
+    describe "let atom = 1 <$ char 'x' <|> char '(' *> fmap sum (many atom) <* char ')' in fmap sum (some atom) <* eof" $ do
+      let
+        atom = 1 <$ char 'x' <|> char '(' *> fmap sum (many atom) <* char ')'
+        p = fmap sum (some atom) <* eof
+      it "\"()\"" $ do
+        let
+          input = "()"
+          output = Right 0
+        parse p input `shouldBe` output
+      it "\"()xxx\"" $ do
+        let
+          input = "()xxx"
+          output = Right 3
+        parse p input `shouldBe` output
+      it "\"()xxx(y\"" $ do
+        let
+          input = "()xxx(y"
+          output = Left $ Unexpected 6 (Set.fromList [Char '(', Char 'x', Char ')']) False
+        parse p input `shouldBe` output
+      it "\"()xxx()\"" $ do
+        let
+          input = "()xxx()y"
+          output = Left $ Unexpected 7 (Set.fromList [Char '(', Char 'x']) True
+        parse p input `shouldBe` output
