@@ -36,12 +36,9 @@ import qualified IR
 import Syntax (Type(..), pattern TypeM, TMeta(..))
 import qualified Syntax
 
-import Test.Parser (parserTests)
-
 main :: IO ()
 main =
   hspec $ do
-    parserTests
     describe "sizeConstraintFor" $ do
       it "*" $
         sizeConstraintFor @Void KType `shouldBe` CSized (TVar $ B ())
