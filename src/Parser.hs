@@ -373,7 +373,7 @@ text (Text (Array arr) (I# off) (I# len)) =
                   then go (# vData, vOff', vRemaining -# 1#, input, 1#, state' #)
                   else (# (# consumed, expected #) | #)
 
--- | Only consumed input if the entire value is matched
+-- | Only consumes input if the entire value is matched
 {-# inline symbol #-}
 symbol :: Text -> Parser s ()
 symbol val = labelled (try (text val)) (Symbol val)
