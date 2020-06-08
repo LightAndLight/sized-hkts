@@ -47,6 +47,7 @@ library
                      , deriving-compat
                      , lens
                      , mtl
+                     , primitive
                      , text
                      , transformers
                      , validation

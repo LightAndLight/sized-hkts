@@ -28,29 +28,29 @@ instance NFData Expr
 parseLambda :: Text -> Either Parser.ParseError Expr
 parseLambda = Parser.parse expr
   where
-    expr :: Parser.Parser Expr
+    expr :: Parser.Parser s Expr
     expr =
       lambda <|>
       app
 
-    spaces :: Parser.Parser ()
+    spaces :: Parser.Parser s ()
     spaces = (Parser.char ' ' *> spaces) <|> pure ()
 
-    ident :: Parser.Parser Text
+    ident :: Parser.Parser s Text
     ident = fmap Text.pack (some . asum $ (\c -> c <$ Parser.char c) <$> ['a'..'z']) <* spaces
 
-    lambda :: Parser.Parser Expr
+    lambda :: Parser.Parser s Expr
     lambda =
       Lam <$ Parser.char '\\' <* spaces <*>
       ident <* Parser.char '-' <* Parser.char '>' <* spaces <*>
       expr
 
-    atom :: Parser.Parser Expr
+    atom :: Parser.Parser s Expr
     atom =
       Var <$> ident <* spaces <|>
       Parser.char '(' *> spaces *> expr <* Parser.char ')' <* spaces
 
-    app :: Parser.Parser Expr
+    app :: Parser.Parser s Expr
     app = foldl App <$> atom <*> many atom
 
 {-# noinline parseLambdaMP #-}
