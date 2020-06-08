@@ -10,6 +10,8 @@ module Parser
   , ParseError(..)
   , parse
   , char
+  , text
+  , symbol
   , eof
   , try
   , (<?>)
@@ -162,8 +164,27 @@ iter (# input, state #) =
     j = byteOffset state
     k = j +# 1#
 
+{-# inline iterByteArray #-}
+iterByteArray :: (# ByteArray#, Int# #) -> (# Char, Int# #)
+iterByteArray (# input, bo #) =
+  case orI# ((<#) (word2Int# m) 0xD800#) ((>#) (word2Int# m) 0xDBFF#) of
+    0# ->
+      (# chr2 (W16# m) (W16# n)
+      , 2# +# bo
+      #)
+    _ ->
+      (# unsafeChr (W16# m)
+      , 1# +# bo
+      #)
+  where
+    m = indexWord16Array# input j
+    n = indexWord16Array# input k
+    j = bo
+    k = j +# 1#
+
 data Label
   = Named Text
+  | Symbol Text
   | Char Char
   | Eof
   deriving (Eq, Ord, Show, Generic)
@@ -303,15 +324,75 @@ char c =
           , (# (# charOffset state_, es' #) | #)
           #)
 
+-- | Equivalent to `traverse_ char . Text.unpack`
+text :: Text -> Parser s ()
+text (Text (Array arr) (I# off) (I# len)) =
+  Parser $ \(# es, input, state, s #) ->
+  case readState state s of
+    (# s', state_ #) ->
+      case go (# arr, off, len, input, 0#, state_ #) of
+        (# (# consumed, expected #) | #) ->
+          let
+            es' = Set.insert (Char expected) es
+          in
+            (# s'
+            , consumed
+            , es'
+            , (# (# charOffset state_, es' #) | #)
+            #)
+        (# | (# consumed, state_' #) #) ->
+          let
+            s'' = writeState state state_' s'
+          in
+            (# s''
+            , consumed
+            , case consumed of
+                1# -> mempty
+                _ -> es
+            , (# | () #)
+            #)
+  where
+    go ::
+      (# ByteArray# -- val's data
+      , Int# -- val's offset
+      , Int# -- amount still to parse
+      , Input
+      , Consumed
+      , State
+      #) ->
+      (# (# Consumed, Char #) | (# Consumed, State #) #)
+    go (# vData, vOff, vRemaining, input, consumed, state #) =
+      case vRemaining of
+        0# -> (# | (# consumed, state #) #)
+        _ ->
+          case iterByteArray (# vData, vOff #) of
+            (# expected, vOff' #) ->
+              case iter (# input, state #) of
+                (# actual, state' #) ->
+                  if expected == actual
+                  then go (# vData, vOff', vRemaining -# 1#, input, 1#, state' #)
+                  else (# (# consumed, expected #) | #)
+
+-- | Only consumed input if the entire value is matched
+{-# inline symbol #-}
+symbol :: Text -> Parser s ()
+symbol val = labelled (try (text val)) (Symbol val)
+
 try :: Parser s a -> Parser s a
 try (Parser p) =
   Parser $
   \(# es, input, state, s #) ->
-  case p (# es, input, state, s #) of
-    (# s', consumed, es', output #) ->
-      case output of
-        (# _ | #) -> (# s', 0#, es', output #)
-        (# | _ #) -> (# s', consumed, es', output #)
+    case readState state s of
+      (# s', state_ #) ->
+        case p (# es, input, state, s' #) of
+          (# s'', consumed, es', output #) ->
+            case output of
+              (# _ | #) ->
+                let
+                  s''' = writeState state state_ s''
+                in
+                  (# s''', 0#, es', output #)
+              (# | _ #) -> (# s'', consumed, es', output #)
 
 eof :: Parser s ()
 eof =
@@ -328,14 +409,13 @@ eof =
           _ ->
             (# s', 0#, es', (# | () #) #)
 
-infixl 4 <?>
-(<?>) :: Parser s a -> Text -> Parser s a
-(<?>) (Parser p) name =
+labelled :: Parser s a -> Label -> Parser s a
+labelled (Parser p) lbl =
   Parser $ \(# es, input, state, s #) ->
   case p (# es, input, state, s #) of
     (# s', consumed, _, output #) ->
       let
-        es' = Named name `Set.insert` es
+        es' = lbl `Set.insert` es
       in
         (# s'
         , consumed
@@ -345,6 +425,10 @@ infixl 4 <?>
               (# (# pos, es' #) | #)
             _ -> output
         #)
+
+infixl 4 <?>
+(<?>) :: Parser s a -> Text -> Parser s a
+(<?>) p name = labelled p (Named name)
 
 data Span = Span {-# UNPACK #-} !Int {-# UNPACK #-} !Int
 

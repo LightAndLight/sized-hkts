@@ -5,7 +5,7 @@ import Control.Applicative ((<|>), empty, some, many)
 import Test.Hspec
 import qualified Data.Set as Set
 
-import Parser (Label(..), ParseError(..), (<?>), parse, char, eof)
+import Parser (Label(..), ParseError(..), (<?>), parse, char, symbol, text, eof)
 
 parserTests :: Spec
 parserTests =
@@ -20,6 +20,26 @@ parserTests =
         input = "b"
         output = Left (Unexpected 0 $ Set.fromList [Char 'a'])
       parse (char 'a') input `shouldBe` output
+    it "parse (symbol \"ab\") \"ab\"" $ do
+      let
+        input = "ab"
+        output = Right ()
+      parse (symbol "ab") input `shouldBe` output
+    it "parse (symbol \"ab\") \"ac\"" $ do
+      let
+        input = "ac"
+        output = Left (Unexpected 0 $ Set.fromList [Symbol "ab"])
+      parse (symbol "ab") input `shouldBe` output
+    it "parse (1 <$ symbol \"toast\" <|> 2 <$ symbol \"toot\" <|> 3 <$ symbol \"tock\") \"toot\"" $ do
+      let
+        input = "toot"
+        output = Right 2
+      parse (1 <$ symbol "toast" <|> 2 <$ symbol "toot" <|> 3 <$ symbol "tock") input `shouldBe` output
+    it "parse (1 <$ symbol \"toast\" <|> 2 <$ symbol \"toot\" <|> 3 <$ symbol \"tock\") \"tool\"" $ do
+      let
+        input = "tool"
+        output = Left (Unexpected 0 $ Set.fromList [Symbol "toast", Symbol "toot", Symbol "tock"])
+      parse (1 <$ symbol "toast" <|> 2 <$ symbol "toot" <|> 3 <$ symbol "tock") input `shouldBe` output
     it "parse (char 'a' *> char 'b') \"ab\"" $ do
       let
         input = "ab"

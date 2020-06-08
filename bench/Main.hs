@@ -6,7 +6,7 @@ import Control.Applicative ((<|>), optional, some, many)
 import Control.DeepSeq (NFData, rnf)
 import Control.Monad (replicateM_)
 import Criterion.Main
-import Data.Foldable (asum, foldl')
+import Data.Foldable (asum, foldl', traverse_)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -112,6 +112,71 @@ parseLambdaAP = Attoparsec.parse expr
     app :: Attoparsec.Parser Expr
     app = foldl App <$> atom <*> many atom
 
+manySymbols :: Text -> Either Parser.ParseError Int
+manySymbols = Parser.parse (ps <* Parser.eof)
+  where
+    ps = (+) <$> p <*> (Parser.char ' ' *> ps <|> pure 0)
+    p =
+      1 <$ Parser.symbol "hello" <|>
+      2 <$ Parser.symbol "goopy" <|>
+      3 <$ Parser.symbol "wonder" <|>
+      4 <$ Parser.symbol "several" <|>
+      5 <$ Parser.symbol "plato" <|>
+      6 <$ Parser.symbol "ticklish"
+
+manyTextsNaive :: Text -> Either Parser.ParseError Int
+manyTextsNaive = Parser.parse (ps <* Parser.eof)
+  where
+    t :: Text -> Parser.Parser s ()
+    t = Text.foldr (\c rest -> Parser.char c *> rest) (pure ())
+
+    ps = (+) <$> p <*> (Parser.char ' ' *> ps <|> pure 0)
+    p =
+      1 <$ t "hello" <|>
+      2 <$ t "goopy" <|>
+      3 <$ t "wonder" <|>
+      4 <$ t "several" <|>
+      5 <$ t "plato" <|>
+      6 <$ t "ticklish"
+
+manyTexts :: Text -> Either Parser.ParseError Int
+manyTexts = Parser.parse (ps <* Parser.eof)
+  where
+    ps = (+) <$> p <*> (Parser.char ' ' *> ps <|> pure 0)
+    p =
+      1 <$ Parser.text "hello" <|>
+      2 <$ Parser.text "goopy" <|>
+      3 <$ Parser.text "wonder" <|>
+      4 <$ Parser.text "several" <|>
+      5 <$ Parser.text "plato" <|>
+      6 <$ Parser.text "ticklish"
+
+manyTextsMP :: Text -> Either (Megaparsec.ParseErrorBundle Text Void) Int
+manyTextsMP = Megaparsec.parse (ps <* Megaparsec.eof) ""
+  where
+    ps = (+) <$> p <*> (Megaparsec.char ' ' *> ps <|> pure 0)
+
+    p =
+      1 <$ Megaparsec.string "hello" <|>
+      2 <$ Megaparsec.string "goopy" <|>
+      3 <$ Megaparsec.string "wonder" <|>
+      4 <$ Megaparsec.string "several" <|>
+      5 <$ Megaparsec.string "plato" <|>
+      6 <$ Megaparsec.string "ticklish"
+
+manyTextsAP :: Text -> Attoparsec.Result Int
+manyTextsAP = Attoparsec.parse (ps <* Attoparsec.endOfInput)
+  where
+    ps = (+) <$> p <*> (Attoparsec.char ' ' *> ps <|> pure 0)
+
+    p =
+      1 <$ Attoparsec.string "hello" <|>
+      2 <$ Attoparsec.string "goopy" <|>
+      3 <$ Attoparsec.string "wonder" <|>
+      4 <$ Attoparsec.string "several" <|>
+      5 <$ Attoparsec.string "plato" <|>
+      6 <$ Attoparsec.string "ticklish"
+
 main :: IO ()
 main = do
   print $ parseLambda "x"
@@ -148,7 +213,23 @@ main = do
     "time" ->
       let (big, args') = case args of; "big":rest -> (True, rest); _ -> (False, args) in
       withArgs args' . defaultMain $
-        [ bench "sage x (\\y -> z)" $ nf parseLambda "x (\\y -> z)"
+        [ let
+            manyGoodInput = "hello goopy wonder several plato ticklish"
+            manyBadInput = "hello goopy wonder several plato ticklish boomy"
+          in
+            bgroup "combinator comparisons"
+              [ bench "sage symbols good" $ nf (\input -> let output@Right{} = manySymbols input in output) manyGoodInput
+              , bench "sage symbols bad" $ nf (\input -> let output@Left{} = manySymbols input in output) manyBadInput
+              , bench "sage texts good" $ nf (\input -> let output@Right{} = manyTexts input in output) manyGoodInput
+              , bench "sage texts bad" $ nf (\input -> let output@Left{} = manyTexts input in output) manyBadInput
+              , bench "sage texts naive good" $ nf (\input -> let output@Right{} = manyTextsNaive input in output) manyGoodInput
+              , bench "sage texts naive bad" $ nf (\input -> let output@Left{} = manyTextsNaive input in output) manyBadInput
+              , bench "megaparsec texts good" $ nf (\input -> let output@Right{} = manyTextsMP input in output) manyGoodInput
+              , bench "megaparsec texts bad" $ nf (\input -> let output@Left{} = manyTextsMP input in output) manyBadInput
+              , bench "attoparsec texts good" $ nf (\input -> let output@Attoparsec.Partial{} = manyTextsAP input in output) manyGoodInput
+              , bench "attoparsec texts bad" $ nf (\input -> let output@Attoparsec.Fail{} = manyTextsAP input in output) manyBadInput
+              ]
+        , bench "sage x (\\y -> z)" $ nf parseLambda "x (\\y -> z)"
         , bench "megaparsec x (\\y -> z)" $ nf parseLambdaMP "x (\\y -> z)"
         , bench "attoparsec x (\\y -> z)" $ nf parseLambdaAP "x (\\y -> z)"
         , bench "sage x (\\y -> a b c d e)" $ nf parseLambda "x (\\y -> a b c d e)"
