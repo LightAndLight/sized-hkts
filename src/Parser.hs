@@ -156,13 +156,13 @@ data ParseError
 instance NFData ParseError
 
 type Consumed = Int#
-type StartSet = (# [Label], Bool #)
+type ExpectedSet = (# Set Label, Bool #)
 
 newtype Parser s a
   = Parser
     { unParser ::
-        (# StartSet, Input, MState s, State# s #) ->
-        (# State# s, Consumed, StartSet, (# ParseError | a #) #)
+        (# ExpectedSet, Input, MState s, State# s #) ->
+        (# State# s, Consumed, ExpectedSet, (# ParseError | a #) #)
     }
 
 {-# inline parse #-}
@@ -174,7 +174,7 @@ parse (Parser p) (Text (Array arr) (I# off) (I# len)) =
         (# e | #) -> Left e
         (# | res #) -> Right res
   where
-    run :: State# RealWorld -> (# State# RealWorld, Consumed, StartSet, (# ParseError | a #) #)
+    run :: State# RealWorld -> (# State# RealWorld, Consumed, ExpectedSet, (# ParseError | a #) #)
     run s =
       case newMState (# off, len, 0# #) s of
         (# s', mstate #) ->
@@ -184,9 +184,9 @@ instance Functor (Parser s) where
   fmap f (Parser p) =
     Parser $ \state ->
     case p state of
-      (# consumed, ss, s, output #) ->
+      (# consumed, es, s, output #) ->
         (# consumed
-        , ss
+        , es
         , s
         , case output of
             (# e | #) ->
@@ -196,58 +196,58 @@ instance Functor (Parser s) where
         #)
 
 instance Applicative (Parser s) where
-  pure a = Parser $ \(# ss, _, _, s #) -> (# s, 0#, ss, (# | a #) #)
+  pure a = Parser $ \(# es, _, _, s #) -> (# s, 0#, es, (# | a #) #)
   {-# inline (<*>) #-}
   Parser pf <*> Parser pa =
-    Parser $ \(# ss, input, state, s #) ->
-    case pf (# ss, input, state, s #) of
-      (# s', consumed, ss', output #) ->
+    Parser $ \(# es, input, state, s #) ->
+    case pf (# es, input, state, s #) of
+      (# s', consumed, es', output #) ->
         case output of
-          (# e | #) -> (# s', consumed, ss', (# e | #) #)
+          (# e | #) -> (# s', consumed, es', (# e | #) #)
           (# | f #) ->
-            case pa (# ss', input, state, s' #) of
-              (# s'', consumed', ss'', output' #) ->
+            case pa (# es', input, state, s' #) of
+              (# s'', consumed', es'', output' #) ->
                 case output' of
                   (# e | #) ->
-                    (# s'', orI# consumed consumed', ss'', (# e | #) #)
+                    (# s'', orI# consumed consumed', es'', (# e | #) #)
                   (# | a #) ->
-                    (# s'', orI# consumed consumed', ss'', (# | f a #) #)
+                    (# s'', orI# consumed consumed', es'', (# | f a #) #)
 
 instance Alternative (Parser s) where
   empty = Parser $ \(# _, _, _, s #) -> (# s, 0#, (# mempty, False #), (# Empty | #) #)
   {-# inline (<|>) #-}
   Parser pa <|> Parser pb =
-    Parser $ \(# ss, input, state, s #) ->
-    case pa (# ss, input, state, s #) of
-      (# s', consumed, ss', output #) ->
+    Parser $ \(# es, input, state, s #) ->
+    case pa (# es, input, state, s #) of
+      (# s', consumed, es', output #) ->
         case consumed of
-          1# -> (# s', consumed, ss', output #)
+          1# -> (# s', consumed, es', output #)
           _ ->
             case output of
-              (# | _ #) -> (# s', 1#, ss', output #)
+              (# | _ #) -> (# s', 1#, es', output #)
               (# _ | #) ->
-                case pb (# ss', input, state, s' #) of
-                  (# s'', consumed', ss'', output' #) ->
-                    (# s'', consumed', ss'', output' #)
+                case pb (# es', input, state, s' #) of
+                  (# s'', consumed', es'', output' #) ->
+                    (# s'', consumed', es'', output' #)
 
 instance Monad (Parser s) where
   Parser pa >>= f =
-    Parser $ \(# ss, input, state, s #) ->
-    case pa (# ss, input, state, s #) of
-      (# s', consumed, ss', output #) ->
+    Parser $ \(# es, input, state, s #) ->
+    case pa (# es, input, state, s #) of
+      (# s', consumed, es', output #) ->
         case output of
-          (# e | #) -> (# s', consumed, ss', (# e | #) #)
+          (# e | #) -> (# s', consumed, es', (# e | #) #)
           (# | a #) ->
-            case unParser (f a) (# ss', input, state, s' #) of
-             (# s'', consumed', ss'', output' #) ->
-               (# s'', orI# consumed consumed', ss'', output' #)
+            case unParser (f a) (# es', input, state, s' #) of
+             (# s'', consumed', es'', output' #) ->
+               (# s'', orI# consumed consumed', es'', output' #)
 
 {-# inline char #-}
 char :: Char -> Parser s ()
 char c =
   Parser $
-  \(# (# ss, expectsEof #), input, state, s #) ->
-  let ss' = Char c : ss in
+  \(# (# es, expectsEof #), input, state, s #) ->
+  let es' = Char c `Set.insert` es in
   case readState state s of
     (# s', state_ #) ->
       case (<=#) (byteOffset state_) (byteLength state_) of
@@ -258,8 +258,8 @@ char c =
                 False ->
                   (# s'
                   , 0#
-                  , (# ss', expectsEof #)
-                  , (# Unexpected (I# (charOffset state_)) (Set.fromList ss') expectsEof | #)
+                  , (# es', expectsEof #)
+                  , (# Unexpected (I# (charOffset state_)) (es') expectsEof | #)
                   #)
                 True ->
                   case writeState state state_' s' of
@@ -272,46 +272,46 @@ char c =
         _ ->
           (# s'
           , 0#
-          , (# ss', expectsEof #)
-          , (# Unexpected (I# (charOffset state_)) (Set.fromList ss') expectsEof | #)
+          , (# es', expectsEof #)
+          , (# Unexpected (I# (charOffset state_)) (es') expectsEof | #)
           #)
 
 try :: Parser s a -> Parser s a
 try (Parser p) =
   Parser $
-  \(# ss, input, state, s #) ->
-  case p (# ss, input, state, s #) of
-    (# s', consumed, ss', output #) ->
+  \(# es, input, state, s #) ->
+  case p (# es, input, state, s #) of
+    (# s', consumed, es', output #) ->
       case output of
-        (# _ | #) -> (# s', 0#, ss', output #)
-        (# | _ #) -> (# s', consumed, ss', output #)
+        (# _ | #) -> (# s', 0#, es', output #)
+        (# | _ #) -> (# s', consumed, es', output #)
 
 eof :: Parser s ()
 eof =
   Parser $
-  \(# (# ss, _ #), _, state, s #) ->
+  \(# (# es, _ #), _, state, s #) ->
   case readState state s of
     (# s', state_ #) ->
       case (<=#) (byteOffset state_) (byteLength state_) of
         1# ->
-          (# s', 0#, (# ss, True #) , (# Unexpected (I# (charOffset state_)) (Set.fromList ss) True | #) #)
+          (# s', 0#, (# es, True #) , (# Unexpected (I# (charOffset state_)) (es) True | #) #)
         _ ->
-          (# s', 0#, (# ss, True #), (# | () #) #)
+          (# s', 0#, (# es, True #), (# | () #) #)
 
 infixl 4 <?>
 (<?>) :: Parser s a -> Text -> Parser s a
 (<?>) (Parser p) name =
-  Parser $ \(# (# ss, expectsEof #), input, state, s #) ->
-  case p (# (# ss, expectsEof #), input, state, s #) of
+  Parser $ \(# (# es, expectsEof #), input, state, s #) ->
+  case p (# (# es, expectsEof #), input, state, s #) of
     (# s', consumed, _, output #) ->
       let
-        ss' = Named name : ss
+        es' = Named name `Set.insert` es
       in
         (# s'
         , consumed
-        , (# ss', expectsEof #)
+        , (# es', expectsEof #)
         , case output of
             (# Unexpected pos _ _ | #) ->
-              (# Unexpected pos (Set.fromList ss') expectsEof | #)
+              (# Unexpected pos (es') expectsEof | #)
             _ -> output
         #)
