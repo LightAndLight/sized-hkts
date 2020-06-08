@@ -6,10 +6,11 @@ import Control.Applicative ((<|>), optional, some, many)
 import Control.DeepSeq (NFData, rnf)
 import Control.Monad (replicateM_)
 import Criterion.Main
-import Data.Foldable (asum)
+import Data.Foldable (asum, foldl')
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.IO as Text (readFile)
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import System.Environment (getArgs, withArgs)
@@ -117,9 +118,12 @@ main = do
   print $ parseLambda "x y"
   print $ parseLambda "\\x -> y"
   print $ parseLambda "x (\\y -> z)"
+  print . parseLambda =<< Text.readFile "bench/res/depth_5.lam"
   benchtype:args <- getArgs
   case benchtype of
-    "memory" ->
+    "memory" -> do
+      file_5 <- Text.readFile "bench/res/depth_5.lam"
+      file_35 <- Text.readFile "bench/res/depth_35.lam"
       mainWith $ do
         func "sage x (\\y -> z)" parseLambda "x (\\y -> z)"
         func "megaparsec x (\\y -> z)" parseLambdaMP "x (\\y -> z)"
@@ -130,9 +134,20 @@ main = do
         func "sage x (\\y -> a b c d ~)" parseLambda "x (\\y -> a b c d ~)"
         func "megaparsec x (\\y -> a b c d ~)" parseLambdaMP "x (\\y -> a b c d ~)"
         func "attoparsec x (\\y -> a b c d ~)" parseLambdaAP "x (\\y -> a b c d ~)"
+        wgroup "32B file" $ do
+          func' "sage" parseLambda file_5
+          func' "megaparsec" parseLambdaMP file_5
+          func' "attoparsec" parseLambdaAP file_5
+        case args of
+          "big":_ ->
+            wgroup "37M file" $ do
+              func' "sage" parseLambda file_35
+              func' "megaparsec" parseLambdaMP file_35
+              func' "attoparsec" parseLambdaAP file_35
+          _ -> pure ()
     "time" ->
-      withArgs args $
-      defaultMain
+      let (big, args') = case args of; "big":rest -> (True, rest); _ -> (False, args) in
+      withArgs args' . defaultMain $
         [ bench "sage x (\\y -> z)" $ nf parseLambda "x (\\y -> z)"
         , bench "megaparsec x (\\y -> z)" $ nf parseLambdaMP "x (\\y -> z)"
         , bench "attoparsec x (\\y -> z)" $ nf parseLambdaAP "x (\\y -> z)"
@@ -142,4 +157,22 @@ main = do
         , bench "sage x (\\y -> a b c d ~)" $ nf parseLambda "x (\\y -> a b c d ~)"
         , bench "megaparsec x (\\y -> a b c d ~)" $ nf parseLambdaMP "x (\\y -> a b c d ~)"
         , bench "attoparsec x (\\y -> a b c d ~)" $ nf parseLambdaAP "x (\\y -> a b c d ~)"
-        ]
+        , env (Text.readFile "bench/res/depth_5.lam") $ \file ->
+            bgroup "32B file"
+            [ bench "sage" $ nf parseLambda file
+            , bench "megaparsec" $ nf parseLambdaMP file
+            , bench "attoparsec" $ nf parseLambdaAP file
+            ]
+        ] <>
+        (if big
+         then
+           [ env (Text.readFile "bench/res/depth_35.lam") $ \file ->
+               bgroup "37M file"
+               [ bench "sage" $ nf parseLambda file
+               , bench "megaparsec" $ nf parseLambdaMP file
+               , bench "attoparsec" $ nf parseLambdaAP file
+               ]
+           ]
+         else
+           []
+        )
