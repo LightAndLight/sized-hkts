@@ -170,10 +170,12 @@ data Label
 
 instance NFData Label
 
-data ParseError = Unexpected Int (Set Label)
+data ParseError = Unexpected !Int !(Set Label)
   deriving (Eq, Show, Generic)
 
 instance NFData ParseError
+
+type ParseError# = (# Int#, Set Label #)
 
 type Consumed = Int#
 type ExpectedSet = Set Label
@@ -182,7 +184,7 @@ newtype Parser s a
   = Parser
     { unParser ::
         (# ExpectedSet, Input, MState s, State# s #) ->
-        (# State# s, Consumed, ExpectedSet, (# ParseError | a #) #)
+        (# State# s, Consumed, ExpectedSet, (# ParseError# | a #) #)
     }
 
 {-# inline parse #-}
@@ -191,10 +193,10 @@ parse (Parser p) (Text (Array arr) (I# off) (I# len)) =
   case runRW# run of
     (# _, _, _, output #) ->
       case output of
-        (# e | #) -> Left e
+        (# (# co, es #) | #) -> Left (Unexpected (I# co) $! es)
         (# | res #) -> Right res
   where
-    run :: State# RealWorld -> (# State# RealWorld, Consumed, ExpectedSet, (# ParseError | a #) #)
+    run :: State# RealWorld -> (# State# RealWorld, Consumed, ExpectedSet, (# ParseError# | a #) #)
     run s =
       case newMState (# off, len, 0# #) s of
         (# s', mstate #) ->
@@ -238,7 +240,7 @@ instance Alternative (Parser s) where
     Parser $ \(# es, _, state, s #) ->
     case readCharOffset state s of
       (# s', co #) ->
-        (# s', 0#, mempty, (# Unexpected (I# co) es | #) #)
+        (# s', 0#, mempty, (# (# co, es #) | #) #)
 
   {-# inline (<|>) #-}
   Parser pa <|> Parser pb =
@@ -284,7 +286,7 @@ char c =
                   (# s'
                   , 0#
                   , es'
-                  , (# Unexpected (I# (charOffset state_)) es' | #)
+                  , (# (# charOffset state_, es' #) | #)
                   #)
                 True ->
                   case writeState state state_' s' of
@@ -298,7 +300,7 @@ char c =
           (# s'
           , 0#
           , es'
-          , (# Unexpected (I# (charOffset state_)) es' | #)
+          , (# (# charOffset state_, es' #) | #)
           #)
 
 try :: Parser s a -> Parser s a
@@ -322,7 +324,7 @@ eof =
       in
         case (<#) (byteOffset state_) (byteLength state_) of
           1# ->
-            (# s', 0#, es', (# Unexpected (I# (charOffset state_)) es' | #) #)
+            (# s', 0#, es', (# (# charOffset state_, es' #) | #) #)
           _ ->
             (# s', 0#, es', (# | () #) #)
 
@@ -339,8 +341,8 @@ infixl 4 <?>
         , consumed
         , es'
         , case output of
-            (# Unexpected pos _ | #) ->
-              (# Unexpected pos es' | #)
+            (# (# pos, _ #) | #) ->
+              (# (# pos, es' #) | #)
             _ -> output
         #)
 
