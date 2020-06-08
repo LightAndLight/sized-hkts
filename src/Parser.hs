@@ -32,6 +32,7 @@ type ByteOffset = Int#
 type CharOffset = Int#
 type ByteLength = Int#
 
+-- Note: byteOffset and byteLength are in terms of Word16, not Word8
 type State = (# ByteOffset, ByteLength, CharOffset #)
 
 {-
