@@ -1,7 +1,7 @@
 {-# language OverloadedStrings #-}
 module Test.Parser (parserTests) where
 
-import Control.Applicative ((<|>), some, many)
+import Control.Applicative ((<|>), empty, some, many)
 import Test.Hspec
 import qualified Data.Set as Set
 
@@ -30,6 +30,11 @@ parserTests =
         input = "ac"
         output = Left (Unexpected 1 $ Set.fromList [Char 'b'])
       parse (char 'a' *> char 'b') input `shouldBe` output
+    it "parse (char 'a' <|> empty) \"b\"" $ do
+      let
+        input = "b"
+        output = Left (Unexpected 0 $ Set.fromList [Char 'a'])
+      parse (char 'a' <|> empty) input `shouldBe` output
     it "parse (char 'a' <|> char 'b') \"a\"" $ do
       let
         input = "a"

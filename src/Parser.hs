@@ -170,9 +170,7 @@ data Label
 
 instance NFData Label
 
-data ParseError
-  = Unexpected Int (Set Label)
-  | Empty
+data ParseError = Unexpected Int (Set Label)
   deriving (Eq, Show, Generic)
 
 instance NFData ParseError
@@ -236,7 +234,12 @@ instance Applicative (Parser s) where
                     (# s'', orI# consumed consumed', es'', (# | f a #) #)
 
 instance Alternative (Parser s) where
-  empty = Parser $ \(# _, _, _, s #) -> (# s, 0#, mempty, (# Empty | #) #)
+  empty =
+    Parser $ \(# es, _, state, s #) ->
+    case readCharOffset state s of
+      (# s', co #) ->
+        (# s', 0#, mempty, (# Unexpected (I# co) es | #) #)
+
   {-# inline (<|>) #-}
   Parser pa <|> Parser pb =
     Parser $ \(# es, input, state, s #) ->
