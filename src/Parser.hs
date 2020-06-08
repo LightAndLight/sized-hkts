@@ -3,7 +3,20 @@
 {-# language MagicHash, UnboxedSums, UnboxedTuples #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
-module Parser where
+{-# options_ghc -fno-warn-unused-top-binds #-}
+module Parser
+  ( Parser
+  , Label(..)
+  , ParseError(..)
+  , parse
+  , char
+  , eof
+  , try
+  , (<?>)
+  , Span(..), spanStart, spanLength
+  , spanned
+  )
+where
 
 import Control.Applicative (Alternative(..))
 import Control.DeepSeq (NFData)
@@ -17,7 +30,7 @@ import Data.Text.Internal.Encoding.Utf16 (chr2)
 import Data.Text.Internal.Unsafe.Char (unsafeChr)
 import GHC.Exts
   ( ByteArray#, Int#, MutableByteArray#, State#, RealWorld
-  , (<#), (>#), (+#), (*#)
+  , (<#), (>#), (+#), (-#), (*#)
   , indexWord16Array#
   , newByteArray#, readWord8ArrayAsInt#, writeWord8ArrayAsInt#
   , orI#, word2Int#
@@ -50,10 +63,11 @@ type MState s = MutableByteArray# s
 
 newMState :: (# ByteOffset, ByteLength, CharOffset #) -> State# s -> (# State# s, MState s #)
 readState :: MState s -> State# s -> (# State# s, (# ByteOffset, ByteLength, CharOffset #) #)
+readCharOffset :: MState s -> State# s -> (# State# s, CharOffset #)
 writeState :: MState s -> (# ByteOffset, ByteLength, CharOffset #) -> State# s -> State# s
 writeByteOffset, writeByteLength, writeCharOffset :: MState s -> Int# -> State# s -> State# s
-(newMState, readState, writeState, writeByteOffset, writeByteLength, writeCharOffset) =
-  (newMState_, readState_, writeState_, writeByteOffset_, writeByteLength_, writeCharOffset_)
+(newMState, readState, readCharOffset, writeState, writeByteOffset, writeByteLength, writeCharOffset) =
+  (newMState_, readState_, readCharOffset_, writeState_, writeByteOffset_, writeByteLength_, writeCharOffset_)
   where
     sizeof_int =
       case sIZEOF_INT of
@@ -87,6 +101,12 @@ writeByteOffset, writeByteLength, writeCharOffset :: MState s -> Int# -> State# 
             s'' = writeState mstate val s'
           in
             (# s'', mstate #)
+
+    readCharOffset_ :: MState s -> State# s -> (# State# s, CharOffset #)
+    readCharOffset_ mstate s =
+      case readWord8ArrayAsInt# mstate coOffset s of
+        (# s', co #) ->
+          (# s', co #)
 
     readState_ :: MState s -> State# s -> (# State# s, (# ByteOffset, ByteLength, CharOffset #) #)
     readState_ mstate s =
@@ -316,3 +336,26 @@ infixl 4 <?>
               (# Unexpected pos (es') expectsEof | #)
             _ -> output
         #)
+
+data Span = Span {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+
+spanStart :: Span -> Int
+spanStart (Span s _) = s
+
+spanLength :: Span -> Int
+spanLength (Span _ l) = l
+
+spanned :: Parser s a -> Parser s (Span, a)
+spanned (Parser p) =
+  Parser $ \(# es, input, state, s #) ->
+  case readCharOffset state s of
+    (# s', start #) ->
+      case p (# es, input, state, s' #) of
+        (# s'', consumed, es', output #) ->
+          case output of
+            (# e | #) ->
+              (# s'', consumed, es', (# e | #) #)
+            (# | a #) ->
+              case readCharOffset state s'' of
+                (# s''', end #) ->
+                  (# s''', consumed, es', (# | (Span (I# start) (I# (end -# start)), a)  #) #)
