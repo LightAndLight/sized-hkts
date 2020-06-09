@@ -1,8 +1,7 @@
 {-# language OverloadedStrings #-}
-module Parser () where
+module Parser (expr) where
 
 import Control.Applicative ((<|>), many, optional)
-import Data.Foldable (foldl')
 import Data.Void (Void)
 import Text.Sage (Parser, (<?>))
 import qualified Text.Sage as Parser
@@ -10,7 +9,7 @@ import qualified Text.Sage as Parser
 import Syntax (Expr(..), Type(..))
 
 expr :: Parser s (Expr Void)
-expr = undefined
+expr = deref
   where
     bool =
       BTrue <$ Parser.text "true" <?> "true" <|>
@@ -37,4 +36,6 @@ expr = undefined
       new <|>
       number
 
-    field = _
+    field =
+      Parser.digits1 <|>
+      _ Parser.lower
