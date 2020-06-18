@@ -4,6 +4,7 @@ module Parser (Parser, Parser.ParseError(..), Parser.parse, Parser.eof, expr) wh
 
 import Bound (Var(..))
 import Control.Applicative ((<|>), many)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Text.Sage (Parser, (<?>))
@@ -17,12 +18,12 @@ expr abstract =
   deref
   where
     bool =
-      BTrue <$ Parser.symbol "true" <|>
-      BFalse <$ Parser.symbol "false"
+      BTrue <$ Parser.symbol "true" <* spaces <|>
+      BFalse <$ Parser.symbol "false" <* spaces
 
     new =
       New <$ Parser.symbol "new" <* Parser.char '[' <*>
-      expr abstract <* Parser.char ']'
+      expr abstract <* Parser.char ']' <* spaces
 
     field =
       Parser.takeWhile1 Parser.pDigit <|>
@@ -39,7 +40,10 @@ expr abstract =
     projectOrCall =
       foldl (\acc -> either (Project acc) (Call acc)) <$>
       atom <*>
-      many (Left <$ Parser.char '.' <*> field <|> Right <$> args)
+      many
+        (Left <$ Parser.char '.' <*> field <* spaces <|>
+         Right <$> args <* spaces
+        )
 
     deref =
       Deref <$ Parser.char '*' <*> deref <|>
@@ -48,13 +52,23 @@ expr abstract =
     number =
       (\f -> Number . f) <$>
       (negate <$ Parser.char '-' <|> pure id) <*>
-      Parser.decimal
+      Parser.decimal <* spaces
 
-    spaces = many $ Parser.satisfy ((== ' '), "space")
+    spaces =
+      many $
+      Parser.satisfy (Parser.Predicate (== ' ') (Set.singleton $ Parser.Named "space"))
 
-    newlines = many $ Parser.satisfy (\case; '\n' -> True; ' ' -> True; _ -> False, "newline")
+    newlines =
+      many $
+      Parser.satisfy
+        (Parser.Predicate
+          (\case; '\n' -> True; ' ' -> True; _ -> False)
+          (Set.singleton $ Parser.Named "newline")
+        )
 
     ident = Parser.takeWhile1 Parser.pLower <?> "identifier"
+
+    ctor = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "constructor"
 
     parens = Parser.between (Parser.char '(') (Parser.char ')')
 
@@ -62,11 +76,11 @@ expr abstract =
       bool <|>
       new <|>
       number <|>
-      (\i -> maybe (Name i) Var $ abstract i) <$> ident <|>
-      parens (expr abstract)
+      (\i -> maybe (Name i) Var $ abstract i) <$> ident <* spaces <|>
+      parens (expr abstract) <* spaces
 
     case_ = do
-      c <- ident
+      c <- ctor
       as <- parens (Vector.fromList <$> commasep ident)
       _ <- spaces *> Parser.symbol "=>" *> spaces
       e <- expr (\n -> B <$> Vector.findIndex (n ==) as <|> F <$> abstract n)
@@ -79,5 +93,5 @@ expr abstract =
         (Parser.char '{' *> newlines)
         (Parser.char '}')
         (Vector.fromList <$>
-         Parser.sepBy case_ (Parser.char ';' <* newlines)
+         Parser.sepBy case_ (Parser.char ',' <* newlines)
         )
