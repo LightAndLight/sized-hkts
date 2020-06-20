@@ -6,13 +6,15 @@ import Bound (Var(..))
 import Data.Void (Void)
 import Test.Hspec
 
-import Syntax (ADT(..), Case(..), Ctors(..), Expr(..), Type(..))
-import Parser (parse, eof, datatype, expr, type_)
+import Syntax (ADT(..), Case(..), Ctors(..), Expr(..), Function(..), Type(..))
+import Parser (parse, eof, datatype, expr, function, type_)
 
 parserTests :: Spec
 parserTests =
   describe "parser" $ do
     describe "expr" $ do
+      it "x" $ do
+        parse (expr (const (Nothing :: Maybe Void)) <* eof) "x" `shouldBe` Right (Name "x")
       it "true" $ do
         parse (expr (const (Nothing :: Maybe Void)) <* eof) "true" `shouldBe` Right BTrue
       it "false" $ do
@@ -77,3 +79,14 @@ parserTests =
            Ctor "Right" [TVar $ B 1] $
            End
           )
+    describe "function" $ do
+      it "fn const<a,b>(x: a, y: b) -> a {\n  x\n}" $ do
+        parse (function <* eof) "fn const<a,b>(x: a, y: b) -> a {\n  x\n}" `shouldBe`
+          Right
+            (Function
+               "const"
+               ["a", "b"]
+               [("x", TVar $ B 0), ("y", TVar $ B 1)]
+               (TVar $ B 0)
+               (Var $ B 0)
+            )

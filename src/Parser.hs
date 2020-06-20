@@ -3,7 +3,10 @@
 module Parser
   ( Parser, Parser.ParseError(..), Parser.parse, Parser.eof
   , datatype
+  , declaration
+  , declarations
   , expr
+  , function
   , type_
   )
 where
@@ -17,18 +20,37 @@ import qualified Data.Vector as Vector
 import Text.Sage (Parser, (<?>))
 import qualified Text.Sage as Parser
 
-import Syntax (ADT(..), Case(..), Ctors(..), Expr(..), Type(..))
+import Syntax
+  ( ADT(..), Ctors(..)
+  , Declaration(..)
+  , Function(..)
+  , Case(..)
+  , Expr(..)
+  , Type(..)
+  )
 
 spaces :: Parser s ()
 spaces =
   void . many $
   Parser.satisfy (Parser.Predicate (== ' ') (Set.singleton $ Parser.Named "space"))
 
+newlines :: Parser s ()
+newlines =
+  void . many $
+  Parser.satisfy
+    (Parser.Predicate
+      (\case; '\n' -> True; ' ' -> True; _ -> False)
+      (Set.singleton $ Parser.Named "newline")
+    )
+
 parens :: Parser s a -> Parser s a
 parens = Parser.between (Parser.char '(') (Parser.char ')' <* Parser.spaces)
 
 braces :: Parser s a -> Parser s a
 braces = Parser.between (Parser.char '{') (Parser.char '}' <* Parser.spaces)
+
+angles :: Parser s a -> Parser s a
+angles = Parser.between (Parser.char '<') (Parser.char '>' <* Parser.spaces)
 
 ident :: Parser s Text
 ident = Parser.takeWhile1 Parser.pLower <?> "identifier"
@@ -75,14 +97,6 @@ expr abstract =
       (negate <$ Parser.char '-' <|> pure id) <*>
       Parser.decimal <* spaces
 
-    newlines =
-      many $
-      Parser.satisfy
-        (Parser.Predicate
-          (\case; '\n' -> True; ' ' -> True; _ -> False)
-          (Set.singleton $ Parser.Named "newline")
-        )
-
     atom =
       bool <|>
       new <|>
@@ -126,7 +140,7 @@ datatype =
   enum
   where
     struct = do
-      Parser.symbol "struct" <* spaces
+      Parser.symbol "struct" <* Parser.char ' ' <* spaces
       tName <- ctor <* spaces
       tArgs <- Vector.fromList <$> many (ident <* spaces)
       _ <- Parser.char '=' <* spaces
@@ -136,7 +150,7 @@ datatype =
         parens (Parser.sepBy (type_ $ fmap B . (`Vector.elemIndex` tArgs)) (Parser.char ',' <* spaces))
       pure $ ADT tName tArgs c
     enum = do
-      Parser.symbol "enum" <* spaces
+      Parser.symbol "enum" <* Parser.char ' ' <* spaces
       tName <- ctor <* spaces
       tArgs <- Vector.fromList <$> many (ident <* spaces)
       cs <-
@@ -153,3 +167,33 @@ datatype =
           )
           (Parser.char ',' <* spaces)
       pure $ ADT tName tArgs cs
+
+function :: Parser s Function
+function = do
+  Parser.symbol "fn" <* Parser.char ' ' <* spaces
+  name <- ident
+  tArgs <-
+    angles $
+    Vector.fromList <$>
+    Parser.sepBy ident (Parser.char ',' *> spaces)
+  let abstractTy = fmap B . (`Vector.elemIndex` tArgs)
+  args <-
+    parens $
+    Vector.fromList <$>
+    Parser.sepBy
+      ((,) <$> ident <* spaces <* Parser.char ':' <* spaces <*> type_ abstractTy)
+      (Parser.char ',' *> spaces)
+  _ <- spaces <* Parser.symbol "->" <* spaces
+  retTy <- type_ abstractTy
+  let abstractTm v = B <$> Vector.elemIndex v (fst <$> args)
+  body <- braces $ newlines *> expr abstractTm <* newlines
+  pure $ Function name tArgs args retTy body
+
+declaration :: Parser s Declaration
+declaration =
+  DData <$> datatype <|>
+  DFunc <$> function
+
+declarations :: Parser s [Declaration]
+declarations =
+  Parser.sepBy declaration newlines

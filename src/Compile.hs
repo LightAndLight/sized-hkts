@@ -3,12 +3,19 @@
 {-# language OverloadedStrings #-}
 {-# language QuantifiedConstraints #-}
 {-# language ScopedTypeVariables #-}
-module Compile (compile) where
+module Compile
+  ( SyntaxError(..)
+  , CompileError(..)
+  , parse
+  , compile
+  , parseAndCompile
+  )
+where
 
 import Bound.Var (Var)
 import Control.Lens.Getter (use, view)
 import Control.Lens.Setter ((%=), (.~), (<>=))
-import Control.Monad.Except (MonadError)
+import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState, evalState, runStateT)
 import Data.Foldable (foldl')
 import Data.Function ((&))
@@ -27,10 +34,39 @@ import qualified Codegen
 import qualified Codegen.C as C
 import Error.TypeError (TypeError)
 import qualified IR
+import qualified Parser
 import qualified Size.Builtins as Size
 import qualified Syntax
 import Unify.KMeta (HasKindMetas)
 import Unify.TMeta (HasTypeMetas)
+
+data SyntaxError
+  = ParseError Parser.ParseError
+
+data CompileError
+  = TypeError TypeError
+  | SyntaxError SyntaxError
+
+parseAndCompile ::
+  MonadError CompileError m =>
+  Text ->
+  m [C.CDecl]
+parseAndCompile input =
+  case parse input of
+    Left err -> throwError $ SyntaxError err
+    Right decls ->
+      case compile decls of
+        Left err -> throwError $ TypeError err
+        Right res -> pure res
+
+parse ::
+  MonadError SyntaxError m =>
+  Text ->
+  m [Syntax.Declaration]
+parse input =
+  case Parser.parse (Parser.declarations <* Parser.eof) input of
+    Left err -> throwError $ ParseError err
+    Right decls -> pure decls
 
 compile ::
   MonadError TypeError m =>
