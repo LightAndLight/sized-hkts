@@ -6,8 +6,8 @@ import Bound (Var(..))
 import Data.Void (Void)
 import Test.Hspec
 
-import Syntax (Case(..), Expr(..), Type(..))
-import Parser (parse, eof, expr, type_)
+import Syntax (ADT(..), Case(..), Ctors(..), Expr(..), Type(..))
+import Parser (parse, eof, datatype, expr, type_)
 
 parserTests :: Spec
 parserTests =
@@ -65,3 +65,15 @@ parserTests =
       it "fun(a, bool) int32" $ do
         parse (type_ (const (Nothing :: Maybe Void)) <* eof) "fun(a, bool) int32" `shouldBe`
           Right (TApp (TFun [TName "a", TBool]) TInt32)
+    describe "datatype" $ do
+      it "struct Pair a b = Pair(a, b)" $ do
+        parse (datatype <* eof) "struct Pair a b = Pair(a, b)" `shouldBe`
+          Right (ADT "Pair" ["a", "b"] $ Ctor "Pair" [TVar $ B 0, TVar $ B 1] End)
+      it "enum Either a b { Left(a), Right(b) }" $ do
+        parse (datatype <* eof) "enum Either a b { Left(a), Right(b) }" `shouldBe`
+          Right
+          (ADT "Either" ["a", "b"] $
+           Ctor "Left" [TVar $ B 0] $
+           Ctor "Right" [TVar $ B 1] $
+           End
+          )

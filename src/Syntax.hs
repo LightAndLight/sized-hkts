@@ -99,7 +99,7 @@ data ADT
   { adtName :: Text
   , adtArgs :: Vector Text
   , adtCtors :: Ctors (Var Int Void)
-  } deriving Show
+  } deriving (Eq, Show)
 
 data Case a
   = Case

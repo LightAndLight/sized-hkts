@@ -2,6 +2,7 @@
 {-# language OverloadedStrings #-}
 module Parser
   ( Parser, Parser.ParseError(..), Parser.parse, Parser.eof
+  , datatype
   , expr
   , type_
   )
@@ -16,7 +17,7 @@ import qualified Data.Vector as Vector
 import Text.Sage (Parser, (<?>))
 import qualified Text.Sage as Parser
 
-import Syntax (Case(..), Expr(..), Type(..))
+import Syntax (ADT(..), Case(..), Ctors(..), Expr(..), Type(..))
 
 spaces :: Parser s ()
 spaces =
@@ -26,8 +27,14 @@ spaces =
 parens :: Parser s a -> Parser s a
 parens = Parser.between (Parser.char '(') (Parser.char ')' <* Parser.spaces)
 
+braces :: Parser s a -> Parser s a
+braces = Parser.between (Parser.char '{') (Parser.char '}' <* Parser.spaces)
+
 ident :: Parser s Text
 ident = Parser.takeWhile1 Parser.pLower <?> "identifier"
+
+ctor :: Parser s Text
+ctor = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "constructor"
 
 expr :: (Text -> Maybe a) -> Parser s (Expr a)
 expr abstract =
@@ -76,8 +83,6 @@ expr abstract =
           (Set.singleton $ Parser.Named "newline")
         )
 
-    ctor = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "constructor"
-
     atom =
       bool <|>
       new <|>
@@ -114,3 +119,37 @@ type_ abstract = app
       parens (type_ abstract) <|>
       (\i -> maybe (TName i) TVar $ abstract i) <$> ident <* spaces
     app = foldl TApp <$> atom <*> many atom
+
+datatype :: Parser s ADT
+datatype =
+  struct <|>
+  enum
+  where
+    struct = do
+      Parser.symbol "struct" <* spaces
+      tName <- ctor <* spaces
+      tArgs <- Vector.fromList <$> many (ident <* spaces)
+      _ <- Parser.char '=' <* spaces
+      c <-
+        (\n as -> Ctor n (Vector.fromList as) End) <$>
+        ctor <*>
+        parens (Parser.sepBy (type_ $ fmap B . (`Vector.elemIndex` tArgs)) (Parser.char ',' <* spaces))
+      pure $ ADT tName tArgs c
+    enum = do
+      Parser.symbol "enum" <* spaces
+      tName <- ctor <* spaces
+      tArgs <- Vector.fromList <$> many (ident <* spaces)
+      cs <-
+        braces $
+        foldr (\(n, as) -> Ctor n (Vector.fromList as)) End <$ spaces <*>
+        Parser.sepBy
+          ((,) <$>
+           ctor <*>
+           parens
+             (Parser.sepBy
+                (type_ (fmap B . (`Vector.elemIndex` tArgs)))
+                (Parser.char ',' <* spaces)
+             )
+          )
+          (Parser.char ',' <* spaces)
+      pure $ ADT tName tArgs cs
