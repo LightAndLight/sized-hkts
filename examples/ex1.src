@@ -1,0 +1,8 @@
+enum List a { Nil(), Cons(a, ptr (List a)) }
+
+fn main() -> int32 {
+  match Cons(2, new[Nil()]) {
+    Nil() => 5,
+    Cons(x, xs) => x
+  }
+}
