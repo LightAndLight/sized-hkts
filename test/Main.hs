@@ -33,7 +33,7 @@ import qualified Size (Size(..), pattern Var)
 import qualified Size.Builtins as Size (builtins)
 import IR (Constraint(..), Kind(..))
 import qualified IR
-import Syntax (Type(..), pattern TypeM, TMeta(..))
+import Syntax (Index(..), Type(..), pattern TypeM, TMeta(..), Span(Unknown))
 import qualified Syntax
 
 import Test.Parser (parserTests)
@@ -51,7 +51,7 @@ main =
           (CImplies
              (CSized (TVar $ B ()))
              (CSized $
-              TApp
+              TApp Unknown
                 (TVar $ F $ B ())
                 (TVar $ B ())
              )
@@ -63,8 +63,8 @@ main =
              (CSized $ TVar $ B ())
              (CForall Nothing KType . CImplies (CSized $ TVar $ B ()) $
               CSized $
-              TApp
-                (TApp
+              TApp Unknown
+                (TApp Unknown
                    (TVar $ F $ F $ B ())
                    (TVar $ F $ B ())
                 )
@@ -84,12 +84,12 @@ main =
              (CForall Nothing KType $
               CImplies
                 (CSized $ TVar $ B ())
-                (CSized $ TApp (TVar $ F $ B ()) (TVar $ B ()))
+                (CSized $ TApp Unknown (TVar $ F $ B ()) (TVar $ B ()))
              ) $
            -- Sized (#0 x y)
            CSized $
-           TApp
-             (TApp
+           TApp Unknown
+             (TApp Unknown
                (TVar $ F $ F $ B ())
                (TVar $ F $ B ())
              )
@@ -102,16 +102,17 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ (CSized TInt32, Size.Word 4)
+              [ (CSized $ TInt32 Unknown, Size.Word 4)
               ]
             , _thLocal = mempty
             }
           e_res = flip evalState emptyTCState . runExceptT $ do
             m <- freshSMeta
-            (,) m <$> simplify mempty absurd absurd theory (m, CSized TInt32)
+            (,) m <$> simplify mempty Syntax.voidSpan absurd absurd theory (m, CSized $ TInt32 Unknown)
         case e_res of
           Left{} -> expectationFailure "expected success, got error"
           Right (d0, res) -> res `shouldBe` ([], [(d0, Size.Word 4 :: Size (Either SMeta Void))])
+
       it "solve $ simplify { (4, Sized I32), (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair I32)) ==> [d0 := 8]" $ do
         let
           kindScope =
@@ -122,11 +123,11 @@ main =
           theory =
             Theory
             { _thGlobal =
-              [ (CSized TInt32, Size.Word 4)
+              [ (CSized $ TInt32 Unknown, Size.Word 4)
               , ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
-                    (CSized $ TApp (TName "Pair") (TVar $ B ()))
+                    (CSized $ TApp Unknown (TName Unknown "Pair") (TVar $ B ()))
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
@@ -136,13 +137,20 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") TInt32)
-            (assumes', sols') <- solve kindScope absurd absurd theory assumes
+              simplify
+                kindScope
+                Syntax.voidSpan
+                absurd
+                absurd
+                theory
+                (m, CSized $ TApp Unknown (TName Unknown "Pair") (TInt32 Unknown))
+            (assumes', sols') <- solve kindScope Syntax.voidSpan absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> expectationFailure $ "expected success, got error: " <> show err
           Right (d0, (assumes, sols)) ->
             Map.lookup d0 sols `shouldBe` Just (Size.Word 8 :: Size (Either SMeta Void))
+
       it "solve $ simplify { (\\x -> x + x, forall a. Sized a => Sized (Pair a)) } (d0 : Sized (Pair I32)) ==> cannot deduce  Sized I32" $ do
         let
           kindScope =
@@ -156,7 +164,7 @@ main =
               [ ( CForall (Just "a") KType $
                   CImplies
                     (CSized $ TVar $ B ())
-                    (CSized $ TApp (TName "Pair") (TVar $ B ()))
+                    (CSized $ TApp Unknown (TName Unknown "Pair") (TVar $ B ()))
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
@@ -166,12 +174,19 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify kindScope absurd absurd theory (m, CSized $ TApp (TName "Pair") TInt32)
-            (assumes', sols') <- solve kindScope absurd absurd theory assumes
+              simplify
+                kindScope
+                Syntax.voidSpan
+                absurd
+                absurd
+                theory
+                (m, CSized $ TApp Unknown (TName Unknown "Pair") (TInt32 Unknown))
+            (assumes', sols') <- solve kindScope Syntax.voidSpan absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
-          Left err -> err `shouldBe` CouldNotDeduce (CSized TInt32)
+          Left err -> err `shouldBe` CouldNotDeduce (CSized $ TInt32 Unknown)
           Right{} -> expectationFailure "expected failure, got success"
+
       it "solve $ simplify { (\\x -> x + x, forall x. Sized x => Sized (Pair x)) } (d0 : forall a. Sized (Pair a) => Sized a) ==> cannot deduce   Sized a" $ do
         let
           theory :: Theory (Either TMeta Void)
@@ -181,7 +196,7 @@ main =
               [ ( CForall (Just "x") KType $
                   CImplies
                     (CSized $ TVar $ B ())
-                    (CSized $ TApp (TName "Pair") (TVar $ B ()))
+                    (CSized $ TApp Unknown (TName Unknown "Pair") (TVar $ B ()))
                 , Size.Lam . toScope $ Size.Plus (Size.Var $ B ()) (Size.Var $ B ())
                 )
               ]
@@ -191,18 +206,19 @@ main =
             m <- freshSMeta
             (assumes, sols) <-
               fmap (fromMaybe ([], mempty)) . runMaybeT $
-              simplify mempty absurd absurd theory
+              simplify mempty Syntax.voidSpan absurd absurd theory
                 ( m
                 , CForall (Just "a") KType $
                   CImplies
-                    (CSized $ TApp (TName "Pair") (TVar $ B ()))
+                    (CSized $ TApp Unknown (TName Unknown "Pair") (TVar $ B ()))
                     (CSized $ TVar $ B ())
                 )
-            (assumes', sols') <- solve @_ @Void mempty absurd absurd theory assumes
+            (assumes', sols') <- solve @_ @Void mempty Syntax.voidSpan absurd absurd theory assumes
             pure (m, (assumes', composeSSubs sols' sols))
         case e_res of
           Left err -> err `shouldBe` CouldNotDeduce (CSized $ TVar $ Right "a")
           Right res -> expectationFailure $ "expected error, got success: " <> show res
+
     describe "typechecking" $ do
       it "id<A>(x : A) -> A" $ do
         let
@@ -210,18 +226,18 @@ main =
             Syntax.Function
             { Syntax.funcName = "id"
             , Syntax.funcTyArgs = ["A"]
-            , Syntax.funcArgs = [("x", TVar $ B 0)]
-            , Syntax.funcRetTy = TVar $ B 0
-            , Syntax.funcBody = Syntax.Var $ B 0
+            , Syntax.funcArgs = [("x", TVar . B $ Index Unknown 0)]
+            , Syntax.funcRetTy = TVar . B $ Index Unknown 0
+            , Syntax.funcBody = Syntax.Var . B $ Index Unknown 0
             }
           output =
             IR.Function
             { IR.funcName = "id"
             , IR.funcTyArgs = [("A", KType)]
-            , IR.funcConstraints = [CSized $ TVar $ B 0]
-            , IR.funcArgs = [("x", TVar $ B 0)]
-            , IR.funcRetTy = TVar $ B 0
-            , IR.funcBody = IR.Var $ B 0
+            , IR.funcConstraints = [CSized $ TVar . B $ Index Unknown 0]
+            , IR.funcArgs = [("x", TVar . B $ Index Unknown 0)]
+            , IR.funcRetTy = TVar . B $ Index Unknown 0
+            , IR.funcBody = IR.Var . B $ Index Unknown 0
             }
         evalStateT (checkFunction mempty mempty mempty mempty mempty input) (emptyTCState @Void) `shouldBe`
           Right output
@@ -232,8 +248,8 @@ main =
             { Syntax.funcName = "five"
             , Syntax.funcTyArgs = []
             , Syntax.funcArgs = []
-            , Syntax.funcRetTy = TInt32
-            , Syntax.funcBody = Syntax.Number 5
+            , Syntax.funcRetTy = TInt32 Unknown
+            , Syntax.funcBody = Syntax.Number Unknown 5
             }
           output =
             IR.Function
@@ -241,7 +257,7 @@ main =
             , IR.funcTyArgs = []
             , IR.funcConstraints = []
             , IR.funcArgs = []
-            , IR.funcRetTy = TInt32
+            , IR.funcRetTy = TInt32 Unknown
             , IR.funcBody = IR.Int32 5
             }
         evalStateT
@@ -258,7 +274,7 @@ main =
               ["A", "B"]
               (Syntax.Ctor
                 "Pair"
-                [Syntax.TVar $ B 0, Syntax.TVar $ B 1]
+                [Syntax.TVar . B $ Index Unknown 0, Syntax.TVar . B $ Index Unknown 1]
                 Syntax.End
               )
 
@@ -267,12 +283,12 @@ main =
             ( IR.Struct
               { IR.datatypeName = "Pair"
               , IR.datatypeTyArgs = [("A", KType), ("B", KType)]
-              , IR.structFields = [(Nothing, TVar $ B 0), (Nothing, TVar $ B 1)]
+              , IR.structFields = [(Nothing, TVar . B $ Index Unknown 0), (Nothing, TVar . B $ Index Unknown 1)]
               }
             , KArr KType $ KArr KType KType
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
-              CSized $ foldl @[] TApp (TName "Pair") [TVar . F $ B (), TVar $ B ()]
+              CSized $ foldl @[] (TApp Unknown) (TName Unknown "Pair") [TVar . F $ B (), TVar $ B ()]
             , Size.Lam $ toScope $
               Size.Lam $ toScope $
               Size.Plus (Size.Var $ F $ B ()) (Size.Var $ B ())
@@ -280,21 +296,21 @@ main =
       it "check `struct Pair<F, A, B>(F<A>, F<B>)`" $ do
         let
           result =
-            flip evalStateT (emptyTCState) $
+            flip evalStateT emptyTCState $
             checkADT
               mempty
               "Pair"
               ["F", "A", "B"]
               (Syntax.Ctor
                  "Pair"
-                 [ Syntax.TApp (Syntax.TVar $ B 0) (Syntax.TVar $ B 1)
-                 , Syntax.TApp (Syntax.TVar $ B 0) (Syntax.TVar $ B 2)
+                 [ Syntax.TApp Unknown (Syntax.TVar . B $ Index Unknown 0) (Syntax.TVar . B $ Index Unknown 1)
+                 , Syntax.TApp Unknown (Syntax.TVar . B $ Index Unknown 0) (Syntax.TVar . B $ Index Unknown 2)
                  ]
                  Syntax.End
               )
           fConstraint =
             CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- a
-            CSized $ foldl @[] TApp (TVar . F $ B ()) [TVar $ B ()]
+            CSized $ foldl @[] (TApp Unknown) (TVar . F $ B ()) [TVar $ B ()]
 
         case result of
           Left err -> expectationFailure $ "Expected success, got failure: " <> show err
@@ -308,8 +324,8 @@ main =
                   , ("B", KType)
                   ]
               , IR.structFields =
-                  [ (Nothing, TApp (TVar $ B 0) (TVar $ B 1))
-                  , (Nothing, TApp (TVar $ B 0) (TVar $ B 2))
+                  [ (Nothing, TApp Unknown (TVar . B $ Index Unknown 0) (TVar . B $ Index Unknown 1))
+                  , (Nothing, TApp Unknown (TVar . B $ Index Unknown 0) (TVar . B $ Index Unknown 2))
                   ]
               }
             kind `shouldBe` KArr (KArr KType KType) (KArr KType $ KArr KType KType)
@@ -317,7 +333,11 @@ main =
               CForall Nothing (KArr KType KType) (CImplies fConstraint $ -- f
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- a
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $ -- b
-              CSized $ foldl @[] TApp (TName "Pair") [TVar . F . F $ B (), TVar . F $ B (), TVar $ B ()])
+              CSized $
+              foldl @[]
+                (TApp Unknown)
+                (TName Unknown "Pair")
+                [TVar . F . F $ B (), TVar . F $ B (), TVar $ B ()])
             size `shouldBe`
               Size.Lam (toScope $
               Size.Lam $ toScope $
@@ -328,13 +348,13 @@ main =
       it "check `struct Sum<A, B>{ Left(A), Right(B) }`" $ do
         let
           result =
-            flip evalStateT (emptyTCState) $
+            flip evalStateT emptyTCState $
             checkADT
               mempty
               "Sum"
               ["A", "B"]
-              (Syntax.Ctor "Left" [Syntax.TVar $ B 0] $
-               Syntax.Ctor "Right" [Syntax.TVar $ B 1] $
+              (Syntax.Ctor "Left" [Syntax.TVar . B $ Index Unknown 0] $
+               Syntax.Ctor "Right" [Syntax.TVar . B $ Index Unknown 1] $
                Syntax.End)
 
         result `shouldBe`
@@ -343,15 +363,15 @@ main =
               { IR.datatypeName = "Sum"
               , IR.datatypeTyArgs = [("A", KType), ("B", KType)]
               , IR.enumCtors =
-                [ ("Left", [ (Nothing, TVar $ B 0) ])
-                , ("Right", [ (Nothing, TVar $ B 1) ])
+                [ ("Left", [ (Nothing, TVar . B $ Index Unknown 0) ])
+                , ("Right", [ (Nothing, TVar . B $ Index Unknown 1) ])
                 ]
               }
             , KArr KType $ KArr KType KType
             -- forall t0. Sized t0 => forall t1. Sized t1 => Sized (Sum t0 t1)
             , CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
               CForall Nothing KType . CImplies (CSized . TVar $ B ()) $
-              CSized $ foldl @[] TApp (TName "Sum") [TVar . F $ B (), TVar $ B ()]
+              CSized $ foldl @[] (TApp Unknown) (TName Unknown "Sum") [TVar . F $ B (), TVar $ B ()]
             , Size.Lam $ toScope $
               Size.Lam $ toScope $
               Size.Plus (Size.Word 1) $
@@ -365,7 +385,7 @@ main =
               mempty
               "Box"
               ["A"]
-              (Syntax.Ctor "Box" [Syntax.TApp Syntax.TPtr . Syntax.TVar $ B 0] $
+              (Syntax.Ctor "Box" [Syntax.TApp Unknown (Syntax.TPtr Unknown) . Syntax.TVar . B $ Index Unknown 0] $
                Syntax.End)
 
         result `shouldBe`
@@ -374,13 +394,13 @@ main =
               { IR.datatypeName = "Box"
               , IR.datatypeTyArgs = [("A", KType)]
               , IR.structFields =
-                  [ (Nothing, TApp TPtr (TVar $ B 0))
+                  [ (Nothing, TApp Unknown (TPtr Unknown) (TVar . B $ Index Unknown 0))
                   ]
                 }
             , KArr KType KType
             -- forall t0. Sized (Box t0)
             , CForall Nothing KType .
-              CSized $ foldl @[] TApp (TName "Box") [TVar $ B ()]
+              CSized $ foldl @[] (TApp Unknown) (TName Unknown "Box") [TVar $ B ()]
             , Size.Word 8
             )
     describe "compile" $ do
@@ -392,8 +412,8 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
-              , Syntax.funcBody = Syntax.Number 0
+              , Syntax.funcRetTy = TInt32 Unknown
+              , Syntax.funcBody = Syntax.Number Unknown 0
               }
             ]
           output =
@@ -413,18 +433,18 @@ main =
               Syntax.Function
               { Syntax.funcName = "id"
               , Syntax.funcTyArgs = ["A"]
-              , Syntax.funcArgs = [("x", TVar $ B 0)]
-              , Syntax.funcRetTy = TVar $ B 0
-              , Syntax.funcBody = Syntax.Var $ B 0
+              , Syntax.funcArgs = [("x", TVar . B $ Index Unknown 0)]
+              , Syntax.funcRetTy = TVar . B $ Index Unknown 0
+              , Syntax.funcBody = Syntax.Var . B $ Index Unknown 0
               }
             , Syntax.DFunc $
               Syntax.Function
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
-                  Syntax.Call (Syntax.Name "id") [Syntax.Number 0]
+                  Syntax.Call Unknown (Syntax.Name Unknown "id") [Syntax.Number Unknown 0]
               }
             ]
           output =
@@ -450,11 +470,11 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
-                    [("x", Syntax.New $ Syntax.Number 26)]
-                    (Syntax.Deref $ Syntax.Name "x")
+                    [("x", Syntax.New Unknown $ Syntax.Number Unknown 26)]
+                    (Syntax.Deref Unknown $ Syntax.Name Unknown "x")
               }
             ]
           output =
@@ -481,7 +501,7 @@ main =
               { Syntax.adtName = "Pair"
               , Syntax.adtArgs = ["A", "B"]
               , Syntax.adtCtors =
-                Syntax.Ctor "Pair" [TVar $ B 0, TVar $ B 1] $
+                Syntax.Ctor "Pair" [TVar . B $ Index Unknown 0, TVar . B $ Index Unknown 1] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -489,16 +509,16 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
                     [ ( "x"
-                      , Syntax.Call
-                          (Syntax.Name "Pair")
-                          [Syntax.BTrue, Syntax.BFalse]
+                      , Syntax.Call Unknown
+                          (Syntax.Name Unknown "Pair")
+                          [Syntax.BTrue Unknown, Syntax.BFalse Unknown]
                       )
                     ]
-                    (Syntax.Number 99)
+                    (Syntax.Number Unknown 99)
               }
             ]
           pairBoolBoolAnn = Just $ C.Ann "Pair bool bool"
@@ -540,7 +560,7 @@ main =
               { Syntax.adtName = "Pair"
               , Syntax.adtArgs = ["A", "B"]
               , Syntax.adtCtors =
-                Syntax.Ctor "Pair" [TVar $ B 0, TVar $ B 1] $
+                Syntax.Ctor "Pair" [TVar . B $ Index Unknown 0, TVar . B $ Index Unknown 1] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -548,16 +568,16 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
                     [ ( "x"
-                      , Syntax.Call
-                          (Syntax.Name "Pair")
-                          [Syntax.Number 22, Syntax.Number 33]
+                      , Syntax.Call Unknown
+                          (Syntax.Name Unknown "Pair")
+                          [Syntax.Number Unknown 22, Syntax.Number Unknown 33]
                       )
                     ]
-                    (Syntax.Project (Syntax.Name "x") "0")
+                    (Syntax.Project Unknown (Syntax.Name Unknown "x") "0")
               }
             ]
           output =
@@ -599,7 +619,10 @@ main =
               , Syntax.adtArgs = ["A"]
               , Syntax.adtCtors =
                 Syntax.Ctor "Nil" [] $
-                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.Ctor "Cons"
+                  [ TVar . B $ Index Unknown 0
+                  , TApp Unknown (TPtr Unknown) $ TApp Unknown (TName Unknown "List") (TVar . B $ Index Unknown 0)
+                  ] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -607,11 +630,11 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
-                    [("x", Syntax.Call (Syntax.Name "Nil") [])]
-                    (Syntax.Number 0)
+                    [("x", Syntax.Call Unknown (Syntax.Name Unknown "Nil") [])]
+                    (Syntax.Number Unknown 0)
               }
             ]
           output =
@@ -652,7 +675,10 @@ main =
               , Syntax.adtArgs = ["A"]
               , Syntax.adtCtors =
                 Syntax.Ctor "Nil" [] $
-                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.Ctor "Cons"
+                  [ TVar . B $ Index Unknown 0
+                  , TApp Unknown (TPtr Unknown) $ TApp Unknown (TName Unknown "List") (TVar . B $ Index Unknown 0)
+                  ] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -660,20 +686,20 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   let
                     e =
-                      Syntax.Call
-                        (Syntax.Name "Cons")
-                        [ Syntax.Number 1
-                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                      Syntax.Call Unknown
+                        (Syntax.Name Unknown "Cons")
+                        [ Syntax.Number Unknown 1
+                        , Syntax.New Unknown $ Syntax.Call Unknown (Syntax.Name Unknown "Nil") []
                         ]
                   in
-                    Syntax.Match e
-                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
-                      , Syntax.Case "Cons" ["a", "b"] $
-                        Syntax.Var (B 0)
+                    Syntax.Match Unknown e
+                      [ Syntax.Case Unknown "Nil" [] $ Syntax.Number Unknown 0
+                      , Syntax.Case Unknown "Cons" ["a", "b"] $
+                        Syntax.Var (B $ Index Unknown 0)
                       ]
               }
             ]
@@ -738,7 +764,10 @@ main =
               , Syntax.adtArgs = ["A"]
               , Syntax.adtCtors =
                 Syntax.Ctor "Nil" [] $
-                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.Ctor "Cons"
+                  [ TVar . B $ Index Unknown 0
+                  , TApp Unknown (TPtr Unknown) $ TApp Unknown (TName Unknown "List") (TVar . B $ Index Unknown 0)
+                  ] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -746,27 +775,27 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   let
                     e =
-                      Syntax.Call
-                        (Syntax.Name "Cons")
-                        [ Syntax.BTrue
-                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                      Syntax.Call Unknown
+                        (Syntax.Name Unknown "Cons")
+                        [ Syntax.BTrue Unknown
+                        , Syntax.New Unknown $ Syntax.Call Unknown (Syntax.Name Unknown "Nil") []
                         ]
                   in
-                    Syntax.Match e
-                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
-                      , Syntax.Case "Cons" ["a", "b"] $
-                        Syntax.Var (B 0)
+                    Syntax.Match Unknown e
+                      [ Syntax.Case Unknown "Nil" [] $ Syntax.Number Unknown 0
+                      , Syntax.Case Unknown "Cons" ["a", "b"] $
+                        Syntax.Var (B $ Index Unknown 0)
                       ]
               }
             ]
         case Compile.compile input of
           Left err ->
             err `shouldBe`
-            TypeMismatch (TypeM TInt32) (TypeM TBool)
+            Compile.TypeError (TypeMismatch Unknown (TypeM $ TInt32 Unknown) (TypeM $ TBool Unknown))
           Right code -> expectationFailure $ "expected error, got " <> show code
       it "9" $ do
         let
@@ -776,8 +805,8 @@ main =
               { Syntax.adtName = "Either"
               , Syntax.adtArgs = ["A", "B"]
               , Syntax.adtCtors =
-                Syntax.Ctor "Left" [TVar $ B 0] $
-                Syntax.Ctor "Right" [TVar $ B 1] $
+                Syntax.Ctor "Left" [TVar . B $ Index Unknown 0] $
+                Syntax.Ctor "Right" [TVar . B $ Index Unknown 1] $
                 Syntax.End
               }
             , Syntax.DData $
@@ -786,7 +815,10 @@ main =
               , Syntax.adtArgs = ["A"]
               , Syntax.adtCtors =
                 Syntax.Ctor "Nil" [] $
-                Syntax.Ctor "Cons" [TVar $ B 0, TApp TPtr $ TApp (TName "List") (TVar $ B 0)] $
+                Syntax.Ctor "Cons"
+                  [ TVar . B $ Index Unknown 0
+                  , TApp Unknown (TPtr Unknown) $ TApp Unknown (TName Unknown "List") (TVar . B $ Index Unknown 0)
+                  ] $
                 Syntax.End
               }
             , Syntax.DFunc $
@@ -794,30 +826,46 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   let
                     e =
-                      Syntax.Call
-                        (Syntax.Name "Cons")
-                        [ Syntax.Number 1
-                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                      -- Cons(1, new[Nil()])
+                      Syntax.Call Unknown
+                        (Syntax.Name Unknown "Cons")
+                        [ Syntax.Number Unknown 1
+                        , Syntax.New Unknown $ Syntax.Call Unknown (Syntax.Name Unknown "Nil") []
                         ]
                   in
-                    Syntax.Match e
-                      [ Syntax.Case "Left" ["a"] $
-                        Syntax.Var (B 0)
-                      , Syntax.Case "Cons" ["a", "b"] $
-                        Syntax.Var (B 0)
+                    -- match Cons(1, new[Nil()]) {
+                    --   Left(a) => a
+                    --   Cons(a, b) => a
+                    -- }
+                    Syntax.Match Unknown e
+                      [ Syntax.Case Unknown "Left" ["a"] $
+                        Syntax.Var (B $ Index Unknown 0)
+                      , Syntax.Case Unknown "Cons" ["a", "b"] $
+                        Syntax.Var (B $ Index Unknown 0)
                       ]
               }
             ]
         case Compile.compile input of
           Left err ->
             err `shouldBe`
-            TypeMismatch
-              (TypeM $ TName "List")
-              (TypeM $ TApp (TName "Either") (TVar . Left $ TMeta 5))
+            Compile.TypeError
+              (TypeMismatch
+                Unknown
+                (TypeM $
+                 TApp Unknown (TName Unknown "List") (TInt32 Unknown)
+                )
+                (TypeM $
+                 foldl @[] (TApp Unknown)
+                   (TName Unknown "Either")
+                   [ TVar . Left $ TMeta Unknown 7
+                   , TVar . Left $ TMeta Unknown 8
+                   ]
+                )
+              )
           Right code -> expectationFailure $ "expected error, got " <> show code
       it "10" $ do
         let
@@ -827,7 +875,7 @@ main =
               { Syntax.adtName = "Identity"
               , Syntax.adtArgs = ["A"]
               , Syntax.adtCtors =
-                Syntax.Ctor "Identity" [TVar $ B 0] $
+                Syntax.Ctor "Identity" [TVar . B $ Index Unknown 0] $
                 Syntax.End
               }
             , Syntax.DData $
@@ -837,8 +885,11 @@ main =
               , Syntax.adtCtors =
                 Syntax.Ctor "Nil" [] $
                 Syntax.Ctor "Cons"
-                  [ TApp (TVar $ B 0) (TVar $ B 1)
-                  , TApp TPtr $ foldl @[] TApp (TName "List") [TVar $ B 0, TVar $ B 1]
+                  [ TApp Unknown (TVar . B $ Index Unknown 0) (TVar . B $ Index Unknown 1)
+                  , TApp Unknown (TPtr Unknown) $
+                    foldl @[] (TApp Unknown)
+                      (TName Unknown "List")
+                      [TVar . B $ Index Unknown 0, TVar . B $ Index Unknown 1]
                   ]
                 Syntax.End
               }
@@ -847,20 +898,20 @@ main =
               { Syntax.funcName = "main"
               , Syntax.funcTyArgs = []
               , Syntax.funcArgs = []
-              , Syntax.funcRetTy = TInt32
+              , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   let
                     e =
-                      Syntax.Call
-                        (Syntax.Name "Cons")
-                        [ Syntax.Call (Syntax.Name "Identity") [Syntax.Number 1]
-                        , Syntax.New $ Syntax.Call (Syntax.Name "Nil") []
+                      Syntax.Call Unknown
+                        (Syntax.Name Unknown "Cons")
+                        [ Syntax.Call Unknown (Syntax.Name Unknown "Identity") [Syntax.Number Unknown 1]
+                        , Syntax.New Unknown $ Syntax.Call Unknown (Syntax.Name Unknown "Nil") []
                         ]
                   in
-                    Syntax.Match e
-                      [ Syntax.Case "Nil" [] $ Syntax.Number 0
-                      , Syntax.Case "Cons" ["a", "b"] $
-                        Syntax.Project (Syntax.Var (B 0)) "0"
+                    Syntax.Match Unknown e
+                      [ Syntax.Case Unknown "Nil" [] $ Syntax.Number Unknown 0
+                      , Syntax.Case Unknown "Cons" ["a", "b"] $
+                        Syntax.Project Unknown (Syntax.Var (B $ Index Unknown 0)) "0"
                       ]
               }
             ]

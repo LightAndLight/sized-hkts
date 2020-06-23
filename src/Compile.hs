@@ -4,7 +4,8 @@
 {-# language QuantifiedConstraints #-}
 {-# language ScopedTypeVariables #-}
 module Compile
-  ( SyntaxError(..)
+  ( CompileError(..)
+  , SyntaxError(..)
   , parse
   , compile
   , parseAndCompile
@@ -130,6 +131,11 @@ typeError err =
     MatchingOnStruct sp ->
       emitSpan sp "can't pattern match on struct"
 
+data CompileError
+  = TypeError TypeError
+  | MissingMainFunction
+  deriving (Eq, Show)
+
 compileError :: CompileError -> Report
 compileError err =
   case err of
@@ -160,10 +166,6 @@ parse input =
   case Parser.parse (Parser.declarations <* Parser.eof) input of
     Left err -> throwError $ ParseError err
     Right decls -> pure decls
-
-data CompileError
-  = TypeError TypeError
-  | MissingMainFunction
 
 compile ::
   MonadError CompileError m =>

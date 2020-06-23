@@ -133,9 +133,11 @@ expr abstract =
          (Vector.fromList <$> Parser.sepBy case_ (Parser.char ',' <* newlines))
       )
 
-type_ :: forall s a. (Parser.Span -> Text -> Maybe a) -> Parser s (Parser.Span, Type a)
-type_ abstract = app
+type_ :: forall s a. (Parser.Span -> Text -> Maybe a) -> Parser s (Type a)
+type_ abstract = snd <$> self
   where
+    self = app
+
     atom :: Parser s (Type a)
     atom =
       (\(sp, _) -> TInt32 $ Known sp) <$> Parser.spanned (Parser.symbol "int32") <* spaces <|>
@@ -144,10 +146,10 @@ type_ abstract = app
       (\(sp, ts) -> TFun (Known sp) $ Vector.fromList ts) <$>
       Parser.spanned
         (Parser.symbol "fun" *>
-         parens (Parser.sepBy (snd <$> type_ abstract) (Parser.char ',' <* spaces)) <*
+         parens (Parser.sepBy (type_ abstract) (Parser.char ',' <* spaces)) <*
          spaces
         ) <|>
-      parens (snd <$> type_ abstract) <|>
+      parens (type_ abstract) <|>
       (\(sp, i) -> maybe (TName (Known sp) i) TVar $ abstract sp i) <$> Parser.spanned ident <* spaces
 
     app =
@@ -171,7 +173,7 @@ datatype =
         ident <*>
         parens
           (Parser.sepBy
-             (fmap snd . type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
+             (type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
              (Parser.char ',' <* spaces)
           )
       pure $ ADT tName tArgs c
@@ -187,7 +189,7 @@ datatype =
            ident <*>
            parens
              (Parser.sepBy
-               (fmap snd . type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
+               (type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
                (Parser.char ',' <* spaces)
              ) <*
             spaces
@@ -210,10 +212,10 @@ function = do
     parens $
     Vector.fromList <$>
     Parser.sepBy
-      ((,) <$> ident <* spaces <* Parser.char ':' <* spaces <*> fmap snd (type_ abstractTy))
+      ((,) <$> ident <* spaces <* Parser.char ':' <* spaces <*> type_ abstractTy)
       (Parser.char ',' *> spaces)
   _ <- spaces <* Parser.symbol "->" <* spaces
-  retTy <- snd <$> type_ abstractTy
+  retTy <- type_ abstractTy
   let abstractTm sp v = B . Index (Known sp) <$> Vector.elemIndex v (fst <$> args)
   body <- braces $ newlines *> expr abstractTm <* newlines
   pure $ Function name tArgs args retTy body

@@ -3,6 +3,7 @@
 {-# language OverloadedLists, OverloadedStrings #-}
 {-# language ScopedTypeVariables #-}
 {-# language TemplateHaskell #-}
+{-# language TypeApplications #-}
 {-# language ViewPatterns #-}
 module Codegen
   ( Code
@@ -346,7 +347,7 @@ genExpr vars expr = do
       a' <- genExpr vars a
       case b of
         IR.Numeric ix ->
-          pure $ C.Project a' (Text.pack $ '_' : show ix)
+          pure $ C.Project a' (Text.pack $ '_' : show @Word64 ix)
         IR.Field n ->
           pure $ C.Project a' n
     IR.Match a inTy bs resTy -> do
@@ -374,7 +375,7 @@ genExpr vars expr = do
                          (\ix ->
                             C.Project
                               (C.Project (C.Project (C.Var varName) "data") ctorName)
-                              (Text.pack $ "_" <> show ix)
+                              (Text.pack $ "_" <> show @Int (Syntax.getIndex ix))
                          )
                          vars
                       )
