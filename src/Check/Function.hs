@@ -1,7 +1,6 @@
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
 {-# language QuantifiedConstraints #-}
-{-# language TypeApplications #-}
 module Check.Function
   (checkFunction)
 where
@@ -11,6 +10,7 @@ import Control.Lens.Getter (use)
 import Control.Lens.Setter ((.~))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State.Strict (evalStateT)
+import Data.Bifunctor (first)
 import Data.Foldable (foldlM, foldrM, traverse_)
 import Data.Function ((&))
 import Data.Map (Map)
@@ -74,7 +74,16 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
       exprResult <-
         checkExpr
           kindScope
-          tyScope
+          (Map.insert
+             name
+             (IR.TypeScheme IR.OFunction
+                (Vector.zip tyArgs tyArgKinds)
+                mempty
+                (first Just <$> args)
+                retTy
+             )
+             tyScope
+          )
           mempty
           (unvar Syntax.indexSpan absurd)
           (unvar ((tyArgs Vector.!) . Syntax.getIndex) absurd)

@@ -144,7 +144,8 @@ type_ abstract = app
       (\(sp, ts) -> TFun (Known sp) $ Vector.fromList ts) <$>
       Parser.spanned
         (Parser.symbol "fun" *>
-         parens (Parser.sepBy (snd <$> type_ abstract) (Parser.char ',' <* spaces))
+         parens (Parser.sepBy (snd <$> type_ abstract) (Parser.char ',' <* spaces)) <*
+         spaces
         ) <|>
       parens (snd <$> type_ abstract) <|>
       (\(sp, i) -> maybe (TName (Known sp) i) TVar $ abstract sp i) <$> Parser.spanned ident <* spaces

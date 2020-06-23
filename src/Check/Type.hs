@@ -210,6 +210,11 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           args
+      requiredConstraints <>=
+        Vector.foldl'
+          (\acc t -> Set.insert (IR.CSized t) acc)
+          mempty
+          argTys
       argTyMetas <- Vector.replicateM (Vector.length argTys) (Syntax.TVar . Left <$> freshTMeta sp KType)
       retTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       unifyType
