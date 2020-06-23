@@ -1,11 +1,14 @@
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
+{-# language RankNTypes #-}
 module Check.Kind
   ( checkKind
   , inferKind
   )
 where
 
+import Control.Lens.Getter ((^.))
+import Control.Lens.Lens (Lens')
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState)
 import Data.Map (Map)
@@ -14,7 +17,7 @@ import Data.Text (Text)
 
 import Error.TypeError (TypeError(..))
 import IR (Kind(..))
-import Syntax (Span, TypeM, pattern TypeM, unTypeM)
+import Syntax (Span, TypeM, pattern TypeM, unTypeM, typemSpan)
 import qualified Syntax
 import Unify.KMeta (HasKindMetas, freshKMeta)
 import Unify.Kind (unifyKind)
@@ -25,14 +28,14 @@ checkKind ::
   , MonadError TypeError m
   ) =>
   Map Text Kind ->
-  (ty -> Span) ->
+  Lens' ty Span ->
   (ty -> Kind) ->
   TypeM ty ->
   Kind ->
   m ()
 checkKind kindScope spans kinds ty k = do
   k' <- inferKind kindScope kinds ty
-  let sp = Syntax.typeSpan (either Syntax.tmetaSpan spans) $ unTypeM ty
+  let sp = ty ^. typemSpan spans
   unifyKind sp k k'
 
 inferKind ::

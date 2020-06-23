@@ -285,7 +285,7 @@ sizeOfType kindScope global t =
         (_, solutions) <-
           solve
             kindScope
-            absurd
+            Syntax.voidSpan
             absurd
             absurd
             (Theory { _thGlobal = global, _thLocal = mempty })
@@ -467,7 +467,9 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst
           body_inst = IR.bindType_Expr inst body
-        (body', sts) <- runWriterT $ genExpr (unvar (C.Var . (fmap fst args Vector.!)) absurd) body_inst
+        (body', sts) <-
+          runWriterT $
+          genExpr (unvar (C.Var . (fmap fst args Vector.!) . Syntax.getIndex) absurd) body_inst
         (\retTy' args' ->
            C.Function retTy'
              (name <> typeSuffix tyArgs')

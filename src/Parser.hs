@@ -57,7 +57,7 @@ angles = Parser.between (Parser.char '<') (Parser.char '>')
 ident :: Parser s Text
 ident = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "identifier"
 
-expr :: forall s a. (Text -> Maybe a) -> Parser s (Expr a)
+expr :: forall s a. (Parser.Span -> Text -> Maybe a) -> Parser s (Expr a)
 expr abstract =
   match <|>
   deref
@@ -111,7 +111,7 @@ expr abstract =
       bool <|>
       new <|>
       number <|>
-      (\(sp, i) -> maybe (Name (Known sp) i) Var $ abstract i) <$> Parser.spanned ident <* spaces <|>
+      (\(sp, i) -> maybe (Name (Known sp) i) Var $ abstract sp i) <$> Parser.spanned ident <* spaces <|>
       parens (expr abstract) <* spaces
 
     case_ = do
@@ -119,7 +119,7 @@ expr abstract =
         Parser.spanned $
         (,) <$> ident <*> parens (Vector.fromList <$> commasep ident)
       _ <- spaces *> Parser.symbol "=>" *> spaces
-      e <- expr (\n -> B <$> Vector.findIndex (n ==) as <|> F <$> abstract n)
+      e <- expr (\s n -> B . Index (Known s) <$> Vector.findIndex (n ==) as <|> F <$> abstract s n)
       pure $ Case (Known sp) c as e
 
     match =
@@ -214,7 +214,7 @@ function = do
       (Parser.char ',' *> spaces)
   _ <- spaces <* Parser.symbol "->" <* spaces
   retTy <- snd <$> type_ abstractTy
-  let abstractTm v = B <$> Vector.elemIndex v (fst <$> args)
+  let abstractTm sp v = B . Index (Known sp) <$> Vector.elemIndex v (fst <$> args)
   body <- braces $ newlines *> expr abstractTm <* newlines
   pure $ Function name tArgs args retTy body
 

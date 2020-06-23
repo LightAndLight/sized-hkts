@@ -2,6 +2,7 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
+{-# language RankNTypes #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
 {-# language QuantifiedConstraints #-}
@@ -22,9 +23,9 @@ where
 import Bound (abstract)
 import Bound.Var (Var(..), unvar)
 import Control.Applicative (empty)
-import Control.Lens.Getter (use)
-import Control.Lens.Lens (Lens')
-import Control.Lens.Setter ((.=))
+import Control.Lens.Getter (view, use)
+import Control.Lens.Lens (Lens', lens)
+import Control.Lens.Setter ((.~), (.=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad (guard)
 import Control.Monad.Except (MonadError, runExcept, throwError)
@@ -32,6 +33,7 @@ import Control.Monad.State.Strict (MonadState, runStateT, get, put)
 import Control.Monad.Trans.Maybe (MaybeT, runMaybeT)
 import Data.Bifunctor (first)
 import Data.Foldable (asum, foldl')
+import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -119,7 +121,7 @@ solve ::
   , Ord ty
   ) =>
   Map Text Kind ->
-  (ty -> Span) ->
+  Lens' ty Span ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -148,7 +150,7 @@ entails ::
   , Eq ty
   ) =>
   Map Text Kind ->
-  (ty -> Span) ->
+  Lens' ty Span ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   (Size (Either SMeta sz), Constraint (Either TMeta ty)) ->
@@ -194,7 +196,7 @@ simplify ::
   , Ord ty
   ) =>
   Map Text Kind ->
-  (ty -> Span) ->
+  Lens' ty Span ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -213,7 +215,11 @@ simplify kindScope spans tyNames kinds !theory (consVar, cons) =
           (aAssumes, asubs) <-
             simplify
               kindScope
-              (unvar (\() -> {- TODO -} Unknown) spans)
+              (lens
+                {- TODO: what about the span for the bound variable? This is bad lens otherwise -}
+                (unvar (\() -> Unknown) (view spans))
+                (unvar (\() _ -> B ()) (\t sp -> F $ t & spans .~ sp))
+              ) 
               (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
               (unvar (\() -> k) kinds)
               (mapTy (fmap F) theory)

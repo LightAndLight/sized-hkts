@@ -7,6 +7,7 @@ where
 
 import Bound.Var (unvar)
 import Control.Lens.Getter (use)
+import Control.Lens.Indexed (ifoldlM)
 import Control.Lens.Setter ((.~))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State.Strict (evalStateT)
@@ -30,7 +31,7 @@ import Syntax (pattern TypeM, unTypeM)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
-import Size (Size)
+import Size (Size, sizeConstraintFor)
 import Unify.KMeta (freshKMeta, solveKMetas)
 import Unify.TMeta (solveMetas_Constraint, solveTMetas_Expr)
 
@@ -57,7 +58,7 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
       let retTy' = TypeM $ Right <$> retTy
       checkKind
         kindScope
-        (unvar Syntax.indexSpan absurd)
+        (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
         (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
         retTy'
         KType
@@ -65,7 +66,7 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
         (\t ->
           checkKind
             kindScope
-            (unvar Syntax.indexSpan absurd)
+            (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
             (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
             t
             KType
@@ -85,25 +86,40 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
              tyScope
           )
           mempty
-          (unvar Syntax.indexSpan absurd)
+          (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
+          (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
           (unvar ((tyArgs Vector.!) . Syntax.getIndex) absurd)
-          (unvar (fst . (args Vector.!)) absurd)
+          (unvar (fst . (args Vector.!) . Syntax.getIndex) absurd)
           (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
-          (unvar (args' Vector.!) absurd)
+          (unvar ((args' Vector.!) . Syntax.getIndex) absurd)
           body
           retTy'
       tyArgKinds' <- traverse (fmap (IR.substKMeta (const KType)) . solveKMetas) tyArgKinds
       constraints <- do
         reqs <- use requiredConstraints
         global <- use globalTheory
-        local <-
-          foldlM
+        local <- do
+          -- locally, we assume each argument is sized
+          argConstraints <-
+            foldlM
             (\acc t -> do
                m <- freshSMeta
                pure $ Map.insert (IR.CSized $ unTypeM t) m acc
             )
             mempty
             args'
+          -- and each type variable is sized
+          ifoldlM
+            (\ix acc k -> do
+               m <- freshSMeta
+               pure $
+                 Map.insert
+                   (Right . first (const $ Syntax.Index {- TODO -} Syntax.Unknown ix) <$> sizeConstraintFor k)
+                   m
+                   acc
+            )
+            argConstraints
+            tyArgKinds'
         reqsAndRet <-
           foldrM
             (\c rest -> do
@@ -115,7 +131,7 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
         (constraints', simplifications) <-
           solve
             kindScope
-            (unvar Syntax.indexSpan absurd)
+            (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
             (unvar (Right . (tyArgs Vector.!) . Syntax.getIndex) absurd)
             (unvar ((tyArgKinds' Vector.!) . Syntax.getIndex) absurd)
             (Theory { _thGlobal = global, _thLocal = local })

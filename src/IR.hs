@@ -41,7 +41,7 @@ data Case ty tm
   = Case
   { caseCtor :: Text
   , caseArgs :: Vector Text
-  , caseExpr :: Expr ty (Var Int tm)
+  , caseExpr :: Expr ty (Var Index tm)
   } deriving (Functor, Foldable, Traversable)
 
 data Expr ty tm
@@ -196,7 +196,7 @@ data Function
   , funcBody ::
       Expr
         (Var Index Void) -- indices from funcTyArgs
-        (Var Int Void) -- indices from funcArgs
+        (Var Index Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
 data CtorSort

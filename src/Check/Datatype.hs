@@ -136,7 +136,7 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
       (_assumes, subs) <-
         solve
           kindScope
-          (unvar indexSpan absurd)
+          (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
           (unvar (Right . (paramNames Vector.!) . getIndex) absurd)
           (unvar ((paramKinds Vector.!) . getIndex) absurd)
           theory
@@ -337,7 +337,7 @@ checkADT kScope datatypeName paramNames ctors = do
             (\ty ->
                 checkKind
                   kindScope
-                  (unvar indexSpan absurd)
+                  (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
                   (unvar ((paramKinds Vector.!) . getIndex) absurd)
                   (TypeM $ Right <$> ty)
                   KType
@@ -366,7 +366,7 @@ checkADT kScope datatypeName paramNames ctors = do
             (\ty ->
                 checkKind
                   kindScope
-                  (unvar indexSpan absurd)
+                  (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan)
                   (unvar ((paramKinds Vector.!) . getIndex) absurd)
                   (TypeM $ Right <$> ty)
                   KType

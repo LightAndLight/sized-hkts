@@ -3,6 +3,7 @@
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
 {-# language QuantifiedConstraints #-}
+{-# language RankNTypes #-}
 {-# language TemplateHaskell #-}
 {-# language ViewPatterns #-}
 module Check.Type
@@ -15,12 +16,14 @@ module Check.Type
 where
 
 import Bound.Var (unvar)
+import Control.Lens.Getter (view)
 import Control.Lens.Lens (Lens')
-import Control.Lens.Setter ((<>=))
+import Control.Lens.Setter ((.~), (<>=) )
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState)
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldlM, foldl', traverse_)
+import Data.Function ((&))
 import Data.Int (Int32)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -33,7 +36,7 @@ import Data.Void (Void, absurd)
 
 import Check.Datatype (HasDatatypeFields, HasDatatypeCtors, getConstructor, getFieldType)
 import Error.TypeError (TypeError(..))
-import Syntax (Span(Unknown), TMeta, TypeM, pattern TypeM, unTypeM, getIndex)
+import Syntax (Span(Unknown), TMeta, TypeM, pattern TypeM, unTypeM, getIndex, typemSpan)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
@@ -122,20 +125,21 @@ inferExpr ::
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
-  (ty -> Span) ->
+  Lens' ty Span ->
+  Lens' tm Span ->
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
   (tm -> TypeM ty) ->
   Syntax.Expr tm ->
   m (InferResult ty tm)
-inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
+inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types expr =
   case expr of
     Syntax.Var a ->
       pure $
       InferResult
       { irExpr = IR.Var a
-      , irType = types a
+      , irType = types a & typemSpan tySpans .~ view tmSpans a
       }
 
     Syntax.Name sp name -> do
@@ -181,7 +185,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
       (letScope', bindings') <-
         foldlM
           (\(acc, bs) (n, b) -> do
-             bResult <- inferExpr kindScope tyScope acc tySpans tyNames tmNames kinds types b
+             bResult <- inferExpr kindScope tyScope acc tySpans tmSpans tyNames tmNames kinds types b
              requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType bResult)
              pure
                ( Map.insert n (irType bResult) acc
@@ -190,7 +194,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           bindings
-      bodyResult <- inferExpr kindScope tyScope letScope' tySpans tyNames tmNames kinds types body
+      bodyResult <- inferExpr kindScope tyScope letScope' tySpans tmSpans tyNames tmNames kinds types body
       pure $
         InferResult
         { irExpr = IR.Let bindings' $ irExpr bodyResult
@@ -198,11 +202,11 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
         }
 
     Syntax.Call sp fun args -> do
-      funResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types fun
+      funResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types fun
       (args', argTys) <-
         foldlM
           (\(as, atys) arg -> do
-             argResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types arg
+             argResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types arg
              pure
                ( Vector.snoc as $ irExpr argResult
                , Vector.snoc atys . unTypeM $ irType argResult
@@ -210,11 +214,6 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           args
-      requiredConstraints <>=
-        Vector.foldl'
-          (\acc t -> Set.insert (IR.CSized t) acc)
-          mempty
-          argTys
       argTyMetas <- Vector.replicateM (Vector.length argTys) (Syntax.TVar . Left <$> freshTMeta sp KType)
       retTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       unifyType
@@ -256,7 +255,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
       }
 
     Syntax.New sp a -> do
-      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types a
       requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType aResult)
       pure $
         InferResult
@@ -265,7 +264,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
         }
 
     Syntax.Deref sp a -> do
-      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types a
       meta <- freshTMeta sp KType
       unifyType
         kindScope
@@ -281,7 +280,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
         }
 
     Syntax.Project sp a field -> do
-      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types a
       aTy <- solveTMetas_Type id . unTypeM $ irType aResult
       let (t, ts) = Syntax.unApply aTy
       case t of
@@ -302,7 +301,7 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
         _ -> throwError $ Can'tInfer sp
 
     Syntax.Match sp a cases -> do
-      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      aResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types a
       resTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       caseExprs <-
         traverse
@@ -321,10 +320,11 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
                   tyScope
                   letScope
                   tySpans
+                  (Syntax.varSpan Syntax.indexSpan tmSpans)
                   tyNames
-                  (unvar (ctorArgs Vector.!) tmNames)
+                  (unvar ((ctorArgs Vector.!) . Syntax.getIndex) tmNames)
                   kinds
-                  (unvar (ctorArgTypes Vector.!) types)
+                  (unvar ((ctorArgTypes Vector.!) . Syntax.getIndex) types)
                   body
               unifyType
                 kindScope
@@ -357,7 +357,8 @@ checkExpr ::
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
-  (ty -> Span) ->
+  Lens' ty Span ->
+  Lens' tm Span ->
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
@@ -365,8 +366,8 @@ checkExpr ::
   Syntax.Expr tm ->
   TypeM ty ->
   m (CheckResult ty tm)
-checkExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr ty = do
-  exprResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr
+checkExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types expr ty = do
+  exprResult <- inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types expr
   unifyType kindScope tySpans (Right . tyNames) kinds ty (irType exprResult)
   pure $
     CheckResult

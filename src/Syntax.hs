@@ -1,22 +1,28 @@
 {-# language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
+{-# language RankNTypes #-}
+{-# language ScopedTypeVariables #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 module Syntax where
 
 import Bound.TH (makeBound)
 import Bound.Var (Var(..), unvar)
+import Control.Lens.Getter ((^.))
+import Control.Lens.Lens (Lens', lens)
+import Control.Lens.Setter ((.~))
 import Control.Monad (ap)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Foldable (fold)
+import Data.Function ((&))
 import Data.Functor.Classes (Eq1(..), eq1, showsPrec1)
 import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Vector (Vector)
-import Data.Void (Void)
+import Data.Void (Void, absurd)
 import qualified Text.Sage as Sage
 
 data Span = Unknown | Known Sage.Span
@@ -84,16 +90,30 @@ instance Ord a => Ord (Type a) where
   -- compare _ TName{} = GT
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
 
-typeSpan :: (a -> Span) -> Type a -> Span
-typeSpan get t =
-  case t of
-    TVar a -> get a
-    TApp sp _ _ -> sp
-    TInt32 sp -> sp
-    TBool sp -> sp
-    TPtr sp -> sp
-    TFun sp _ -> sp
-    TName sp _ -> sp
+typeSpan :: forall a. Lens' a Span -> Lens' (Type a) Span
+typeSpan as = lens get set
+  where
+    get :: Type a -> Span
+    get t =
+      case t of
+        TVar a -> a ^. as
+        TApp sp _ _ -> sp
+        TInt32 sp -> sp
+        TBool sp -> sp
+        TPtr sp -> sp
+        TFun sp _ -> sp
+        TName sp _ -> sp
+
+    set :: Type a -> Span -> Type a
+    set t sp' =
+      case t of
+        TVar a -> TVar (a & as .~ sp')
+        TApp _ a b -> TApp sp' a b
+        TInt32 _ -> TInt32 sp'
+        TBool _ -> TBool sp'
+        TPtr _ -> TPtr sp'
+        TFun _ a -> TFun sp' a
+        TName _ a -> TName sp' a
 
 unApply :: Type a -> (Type a, [Type a])
 unApply = go []
@@ -115,6 +135,30 @@ tmetaSpan :: TMeta -> Span
 tmetaSpan (TMeta s _) = s
 
 type TypeM = ExceptT TMeta Type
+
+eitherTMetaSpan :: forall a. Lens' a Span -> Lens' (Either TMeta a) Span
+eitherTMetaSpan as = lens get set
+  where
+    get :: Either TMeta a -> Span
+    get t =
+      case t of
+        Left (TMeta sp _) -> sp
+        Right a -> a ^. as
+
+    set :: Either TMeta a -> Span -> Either TMeta a
+    set t sp' =
+      case t of
+        Left (TMeta _ v) -> Left (TMeta sp' v)
+        Right a -> Right (a & as .~ sp')
+
+typemSpan :: forall a. Lens' a Span -> Lens' (TypeM a) Span
+typemSpan as = lens get set
+  where
+    get :: TypeM a -> Span
+    get t = unTypeM t ^. typeSpan (eitherTMetaSpan as)
+
+    set :: TypeM a -> Span -> TypeM a
+    set t sp' = TypeM $ unTypeM t & typeSpan (eitherTMetaSpan as) .~ sp'
 
 pattern TypeM :: Type (Either TMeta ty) -> TypeM ty
 pattern TypeM a = ExceptT a
@@ -169,14 +213,26 @@ data Index
   = Index !Span {-# UNPACK #-} !Int
   deriving Show
 
+voidSpan :: Lens' Void Span
+voidSpan = lens absurd absurd
+
+indexSpan :: Lens' Index Span
+indexSpan = lens get set
+  where
+    get (Index sp _) = sp
+    set (Index _ i) sp' = Index sp' i
+
+varSpan :: Lens' a Span -> Lens' b Span -> Lens' (Var a b) Span
+varSpan as bs = lens get set
+  where
+    get = unvar (^. as) (^. bs)
+    set = unvar (\a new -> B $ a & as .~ new) (\b new -> F $ b & bs .~ new)
+
 instance Eq Index where; Index _ i == Index _ i' = i == i'
 instance Ord Index where; Index _ i `compare` Index _ i' = i `compare` i'
 
 getIndex :: Index -> Int
 getIndex (Index _ i) = i
-
-indexSpan :: Index -> Span
-indexSpan (Index s _) = s
 
 data ADT
   = ADT
@@ -190,7 +246,7 @@ data Case a
   { caseCtorSpan :: !Span
   , caseCtor :: Text
   , caseArgs :: Vector Text
-  , caseExpr :: Expr (Var Int a)
+  , caseExpr :: Expr (Var Index a)
   } deriving (Functor, Foldable, Traversable)
 
 data Expr a
@@ -246,7 +302,7 @@ data Function
   , funcTyArgs :: Vector Text
   , funcArgs :: Vector (Text, Type (Var Index Void)) -- indices from funcTyArgs
   , funcRetTy :: Type (Var Index Void) -- indices from funcTyArgs
-  , funcBody :: Expr (Var Int Void) -- indices from funcArgs
+  , funcBody :: Expr (Var Index Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
 data Declaration

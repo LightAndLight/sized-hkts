@@ -1,7 +1,10 @@
 {-# language FlexibleContexts #-}
 {-# language PatternSynonyms #-}
+{-# language RankNTypes #-}
 module Unify.Type (unifyType) where
 
+import Control.Lens.Getter ((^.))
+import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((%=))
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState)
@@ -13,7 +16,7 @@ import qualified Data.Vector as Vector
 
 import Check.Kind (inferKind)
 import Error.TypeError (TypeError(..), typeMismatch, renderTyName)
-import Syntax (Span, TypeM, pattern TypeM, unTypeM, tmetaSpan, typeSpan)
+import Syntax (Span, TypeM, pattern TypeM, unTypeM, tmetaSpan, typemSpan)
 import qualified Syntax
 import IR (Kind(..))
 import Unify.KMeta (HasKindMetas)
@@ -26,7 +29,7 @@ unifyType ::
   , Eq ty
   ) =>
   Map Text Kind ->
-  (ty -> Span) ->
+  Lens' ty Span ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   TypeM ty ->
@@ -35,7 +38,7 @@ unifyType ::
 unifyType kindScope spans tyNames kinds expected actual = do
   eKind <- inferKind kindScope kinds expected
   aKind <- inferKind kindScope kinds actual
-  unifyKind (typeSpan (either tmetaSpan spans) $ unTypeM actual) eKind aKind
+  unifyKind (actual ^. typemSpan spans) eKind aKind
   case unTypeM expected of
     Syntax.TVar (Left m) -> solveLeft m actual
     Syntax.TVar (Right a) ->
@@ -44,30 +47,30 @@ unifyType kindScope spans tyNames kinds expected actual = do
         Syntax.TVar (Right b) ->
           if a == b
           then pure mempty
-          else throwError $ typeMismatch tyNames (spans b) expected actual
-        actual' -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) actual') expected actual
+          else throwError $ typeMismatch tyNames (b ^. spans) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TApp _ a b ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TApp _ a' b' -> do
           unifyType kindScope spans tyNames kinds (TypeM a) (TypeM a')
           unifyType kindScope spans tyNames kinds (TypeM b) (TypeM b')
-        actual' -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) actual') expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TInt32{} ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TInt32{} -> pure mempty
-        a -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) a) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TBool{} ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TBool{} -> pure mempty
-        a -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) a) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TPtr{} ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TPtr{} -> pure mempty
-        a -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) a) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TFun _ args ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
@@ -75,12 +78,12 @@ unifyType kindScope spans tyNames kinds expected actual = do
           traverse_
             (\(a, b) -> unifyType kindScope spans tyNames kinds (TypeM a) (TypeM b))
             (Vector.zip args args')
-        a -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) a) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
     Syntax.TName _ n ->
       case unTypeM actual of
         Syntax.TVar (Left m) -> solveRight expected m
         Syntax.TName _ n' | n == n' -> pure mempty
-        a -> throwError $ typeMismatch tyNames (typeSpan (either tmetaSpan spans) a) expected actual
+        _ -> throwError $ typeMismatch tyNames (actual ^. typemSpan spans) expected actual
   where
     solveLeft m actual' = do
       m_t <- getTMeta m
@@ -89,9 +92,9 @@ unifyType kindScope spans tyNames kinds expected actual = do
         Nothing ->
           case unTypeM actual' of
             Syntax.TVar (Left m') | m == m' -> pure mempty
-            a ->
+            _ ->
               if any (either (== m) (const False)) (unTypeM actual')
-              then throwError $ TypeOccurs (typeSpan (either tmetaSpan spans) a) m (renderTyName . tyNames <$> actual')
+              then throwError $ TypeOccurs (actual' ^. typemSpan spans) m (renderTyName . tyNames <$> actual')
               else tmetaSolutions %= Map.insert m actual'
     solveRight expected' m = do
       m_t <- getTMeta m
