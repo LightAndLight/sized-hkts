@@ -55,16 +55,31 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
       tyArgKinds <- traverse (fmap KVar . const freshKMeta) tyArgs
       let args' = TypeM . fmap Right . snd <$> args
       let retTy' = TypeM $ Right <$> retTy
-      checkKind kindScope (unvar (tyArgKinds Vector.!) absurd) retTy' KType
-      traverse_ (\t -> checkKind kindScope (unvar (tyArgKinds Vector.!) absurd) t KType) args'
+      checkKind
+        kindScope
+        (unvar Syntax.indexSpan absurd)
+        (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
+        retTy'
+        KType
+      traverse_
+        (\t ->
+          checkKind
+            kindScope
+            (unvar Syntax.indexSpan absurd)
+            (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
+            t
+            KType
+        )
+        args'
       exprResult <-
         checkExpr
           kindScope
           tyScope
           mempty
-          (unvar (tyArgs Vector.!) absurd)
+          (unvar Syntax.indexSpan absurd)
+          (unvar ((tyArgs Vector.!) . Syntax.getIndex) absurd)
           (unvar (fst . (args Vector.!)) absurd)
-          (unvar (tyArgKinds Vector.!) absurd)
+          (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
           (unvar (args' Vector.!) absurd)
           body
           retTy'
@@ -91,8 +106,9 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
         (constraints', simplifications) <-
           solve
             kindScope
-            (unvar (Right . (tyArgs Vector.!)) absurd)
-            (unvar (tyArgKinds' Vector.!) absurd)
+            (unvar Syntax.indexSpan absurd)
+            (unvar (Right . (tyArgs Vector.!) . Syntax.getIndex) absurd)
+            (unvar ((tyArgKinds' Vector.!) . Syntax.getIndex) absurd)
             (Theory { _thGlobal = global, _thLocal = local })
             reqsAndRet
         pure . Vector.fromList $

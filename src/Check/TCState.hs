@@ -42,7 +42,7 @@ data TCState ty
   = TCState
   { _tcsKindMeta :: KMeta
   , _tcsKindSolutions :: Map KMeta Kind
-  , _tcsTypeMeta :: TMeta
+  , _tcsTypeMeta :: Int
   , _tcsTypeMetaKinds :: Map TMeta Kind
   , _tcsTypeSolutions :: Map TMeta (TypeM ty)
   , _tcsConstraints :: Set (Constraint (Either TMeta ty))
@@ -50,7 +50,7 @@ data TCState ty
   , _tcsGlobalTheory :: Map (Constraint Void) (Size Void)
   , _tcsDatatypeFields :: Map Text IR.Fields
   , _tcsDatatypeCtors :: Map Text IR.Constructor
-  } deriving Show
+  }
 makeLenses ''TCState
 
 emptyTCState :: Ord ty => TCState ty
@@ -58,7 +58,7 @@ emptyTCState =
   TCState
   { _tcsKindMeta = KMeta 0
   , _tcsKindSolutions = mempty
-  , _tcsTypeMeta = TMeta 0
+  , _tcsTypeMeta = 0
   , _tcsTypeMetaKinds = mempty
   , _tcsTypeSolutions = mempty
   , _tcsConstraints = mempty

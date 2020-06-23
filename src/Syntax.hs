@@ -11,38 +11,108 @@ import Control.Monad (ap)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Data.Deriving (deriveEq1, deriveShow1)
 import Data.Foldable (fold)
-import Data.Functor.Classes (eq1, showsPrec1)
+import Data.Functor.Classes (Eq1(..), eq1, showsPrec1)
 import qualified Data.List as List
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Vector (Vector)
 import Data.Void (Void)
+import qualified Text.Sage as Sage
+
+data Span = Unknown | Known Sage.Span
+  deriving (Eq, Ord, Show)
+
+instance Semigroup Span where
+  Unknown <> a = a
+  a <> Unknown = a
+  Known a <> Known b = Known (a <> b)
 
 data Type a
   = TVar a
-  | TApp (Type a) (Type a)
-  | TInt32
-  | TBool
-  | TPtr
-  | TFun (Vector (Type a))
-  | TName Text
+  | TApp !Span (Type a) (Type a)
+  | TInt32 !Span
+  | TBool !Span
+  | TPtr !Span
+  | TFun !Span (Vector (Type a))
+  | TName !Span Text
   deriving (Functor, Foldable, Traversable)
 makeBound ''Type
-deriveEq1 ''Type
+-- deriveEq1 ''Type
+-- instance Eq a => Eq (Type a) where; (==) = eq1
+-- deriving instance Ord a => Ord (Type a)
 deriveShow1 ''Type
-instance Eq a => Eq (Type a) where; (==) = eq1
-deriving instance Ord a => Ord (Type a)
+instance Eq1 Type where
+  liftEq f (TVar a) (TVar a') = f a a'
+  liftEq f (TApp _ a b) (TApp _ a' b') = liftEq f a a' && liftEq f b b'
+  liftEq _ (TInt32 _) (TInt32 _) = True
+  liftEq _ (TBool _) (TBool _) = True
+  liftEq _ (TPtr _) (TPtr _) = True
+  liftEq f (TFun _ ts) (TFun _ ts') = liftEq (liftEq f) ts ts'
+  liftEq _ (TName _ a) (TName _ a') = a == a'
+  liftEq _ _ _ = False
+instance Eq a => Eq (Type a) where (==) = eq1
+instance Ord a => Ord (Type a) where
+  compare (TVar a) (TVar a') = compare a a'
+  compare TVar{} _ = LT
+  compare _ TVar{} = GT
+
+  compare (TApp _ a b) (TApp _ a' b') =
+    case compare a a' of
+      EQ -> compare b b'
+      c -> c
+  compare TApp{} _ = LT
+  compare _ TApp{} = GT
+
+  compare (TInt32 _) (TInt32 _) = EQ
+  compare TInt32{} _ = LT
+  compare _ TInt32{} = GT
+
+  compare (TBool _) (TBool _) = EQ
+  compare TBool{} _ = LT
+  compare _ TBool{} = GT
+
+  compare (TPtr _) (TPtr _) = EQ
+  compare TPtr{} _ = LT
+  compare _ TPtr{} = GT
+
+  compare (TFun _ a) (TFun _ a') = compare a a'
+  compare TFun{} _ = LT
+  compare _ TFun{} = GT
+
+  compare (TName _ a) (TName _ a') = compare a a'
+  -- compare TName{} _ = LT
+  -- compare _ TName{} = GT
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
+
+typeSpan :: (a -> Span) -> Type a -> Span
+typeSpan get t =
+  case t of
+    TVar a -> get a
+    TApp sp _ _ -> sp
+    TInt32 sp -> sp
+    TBool sp -> sp
+    TPtr sp -> sp
+    TFun sp _ -> sp
+    TName sp _ -> sp
 
 unApply :: Type a -> (Type a, [Type a])
 unApply = go []
   where
     go ts t =
       case t of
-        TApp a b -> go (b:ts) a
+        TApp _ a b -> go (b:ts) a
         _ -> (t, ts)
 
-newtype TMeta = TMeta Int
-  deriving (Eq, Ord, Show)
+data TMeta = TMeta !Span {-# UNPACK #-} !Int
+  deriving Show
+instance Eq TMeta where; TMeta _ v == TMeta _ v' = v == v'
+instance Ord TMeta where; TMeta _ v `compare` TMeta _ v' = v `compare` v'
+
+prettyTMeta :: TMeta -> Text
+prettyTMeta (TMeta _ n) = Text.pack $ '?' : show n
+
+tmetaSpan :: TMeta -> Span
+tmetaSpan (TMeta s _) = s
 
 type TypeM = ExceptT TMeta Type
 
@@ -60,32 +130,33 @@ prettyType :: (a -> Text) -> Type a -> Text
 prettyType var ty =
   case ty of
     TVar a -> var a
-    TApp a b ->
+    TApp _ a b ->
       prettyType var a <>
       " " <>
       (case b of
          TApp{} -> parens
          _ -> id
       ) (prettyType var b)
-    TInt32 -> "int32"
-    TBool -> "bool"
-    TPtr -> "ptr"
-    TFun args ->
+    TInt32 _ -> "int32"
+    TBool _ -> "bool"
+    TPtr _ -> "ptr"
+    TFun _ args ->
       "fun(" <>
       fold
         (List.intersperse ", " $
          foldr ((:) . prettyType var) [] args
         ) <>
       ")"
-    TName n -> n
+    TName _ n -> n
 
 data Ctors a
   = End
   | Ctor { ctorName :: Text, ctorArgs :: Vector (Type a), ctorRest :: Ctors a }
   deriving (Functor, Foldable, Traversable)
-deriveEq1 ''Ctors
+-- deriveEq1 ''Ctors
+-- instance Eq a => Eq (Ctors a) where; (==) = eq1
+deriving instance Eq a => Eq (Ctors a)
 deriveShow1 ''Ctors
-instance Eq a => Eq (Ctors a) where; (==) = eq1
 instance Show a => Show (Ctors a) where; showsPrec = showsPrec1
 
 ctorsToList :: Ctors a -> [(Text, Vector (Type a))]
@@ -94,37 +165,51 @@ ctorsToList cs =
     End -> []
     Ctor a b c -> (a, b) : ctorsToList c
 
+data Index
+  = Index !Span {-# UNPACK #-} !Int
+  deriving Show
+
+instance Eq Index where; Index _ i == Index _ i' = i == i'
+instance Ord Index where; Index _ i `compare` Index _ i' = i `compare` i'
+
+getIndex :: Index -> Int
+getIndex (Index _ i) = i
+
+indexSpan :: Index -> Span
+indexSpan (Index s _) = s
+
 data ADT
   = ADT
   { adtName :: Text
   , adtArgs :: Vector Text
-  , adtCtors :: Ctors (Var Int Void)
+  , adtCtors :: Ctors (Var Index Void)
   } deriving (Eq, Show)
 
 data Case a
   = Case
-  { caseCtor :: Text
+  { caseCtorSpan :: !Span
+  , caseCtor :: Text
   , caseArgs :: Vector Text
   , caseExpr :: Expr (Var Int a)
   } deriving (Functor, Foldable, Traversable)
 
 data Expr a
   = Var a
-  | Name Text
+  | Name !Span Text
 
   | Let (Vector (Text, Expr a)) (Expr a)
-  | Call (Expr a) (Vector (Expr a))
+  | Call !Span (Expr a) (Vector (Expr a))
 
-  | Number Integer
+  | Number !Span Integer
 
-  | BTrue
-  | BFalse
+  | BTrue !Span
+  | BFalse !Span
 
-  | New (Expr a)
-  | Deref (Expr a)
+  | New !Span (Expr a)
+  | Deref !Span (Expr a)
 
-  | Project (Expr a) Text
-  | Match (Expr a) (Vector (Case a))
+  | Project !Span (Expr a) Text
+  | Match !Span (Expr a) (Vector (Case a))
   deriving (Functor, Foldable, Traversable)
 deriveEq1 ''Case
 deriveShow1 ''Case
@@ -137,30 +222,30 @@ instance Eq a => Eq (Expr a) where; (==) = eq1
 instance Show a => Show (Expr a) where; showsPrec = showsPrec1
 
 bindExpr_Case :: (a -> Expr b) -> Case a -> Case b
-bindExpr_Case f (Case name args e) = Case name args (e >>= unvar (Var . B) (fmap F . f))
+bindExpr_Case f (Case sp name args e) = Case sp name args (e >>= unvar (Var . B) (fmap F . f))
 
 instance Applicative Expr where; pure = Var; (<*>) = ap
 instance Monad Expr where
   expr >>= f =
     case expr of
       Var a -> f a
-      Name n -> Name n
+      Name sp n -> Name sp n
       Let es b -> Let ((\(n, e) -> (n, e >>= f)) <$> es) (b >>= f)
-      Call a args -> Call (a >>= f) ((>>= f) <$> args)
-      Number n -> Number n
-      BTrue -> BTrue
-      BFalse -> BFalse
-      New v -> New (v >>= f)
-      Deref p -> Deref (p >>= f)
-      Project a field -> Project (a >>= f) field
-      Match e cs -> Match (e >>= f) (bindExpr_Case f <$> cs)
+      Call sp a args -> Call sp (a >>= f) ((>>= f) <$> args)
+      Number sp n -> Number sp n
+      BTrue sp -> BTrue sp
+      BFalse sp -> BFalse sp
+      New sp v -> New sp (v >>= f)
+      Deref sp p -> Deref sp (p >>= f)
+      Project sp a field -> Project sp (a >>= f) field
+      Match sp e cs -> Match sp (e >>= f) (bindExpr_Case f <$> cs)
 
 data Function
   = Function
   { funcName :: Text
   , funcTyArgs :: Vector Text
-  , funcArgs :: Vector (Text, Type (Var Int Void)) -- indices from funcTyArgs
-  , funcRetTy :: Type (Var Int Void) -- indices from funcTyArgs
+  , funcArgs :: Vector (Text, Type (Var Index Void)) -- indices from funcTyArgs
+  , funcRetTy :: Type (Var Index Void) -- indices from funcTyArgs
   , funcBody :: Expr (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 

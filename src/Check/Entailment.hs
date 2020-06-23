@@ -42,7 +42,7 @@ import Check.TCState.FilterTypes (FilterTypes, filterTypes, mapTypes)
 import Error.TypeError (TypeError(..), renderTyName)
 import IR (Constraint(..), Kind)
 import Size((.@), Size(..), pattern Var)
-import Syntax (TMeta(..), TMeta, pattern TypeM)
+import Syntax (TMeta(..), TMeta, pattern TypeM, Span(Unknown))
 import Unify.KMeta (HasKindMetas(..))
 import Unify.TMeta (HasTypeMetas(..), freshTMeta, solveMetas_Constraint)
 import Unify.Type (unifyType)
@@ -119,6 +119,7 @@ solve ::
   , Ord ty
   ) =>
   Map Text Kind ->
+  (ty -> Span) ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -127,19 +128,19 @@ solve ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta Void))
     )
-solve _ _ _ _ [] = pure ([], mempty)
-solve kindScope tyNames kinds theory (c:cs) = do
-  m_res <- runMaybeT $ simplify kindScope tyNames kinds theory c
+solve _ _ _ _ _ [] = pure ([], mempty)
+solve kindScope spans tyNames kinds theory (c:cs) = do
+  m_res <- runMaybeT $ simplify kindScope spans tyNames kinds theory c
   case m_res of
     Nothing -> do
       c' <- solveMetas_Constraint (snd c)
       case withoutMetas (Right . renderTyName . tyNames) c' of
         Nothing -> do
-          (cs', sols') <- solve kindScope tyNames kinds theory cs
+          (cs', sols') <- solve kindScope spans tyNames kinds theory cs
           pure ((fst c, c') : cs', sols')
         Just c'' -> throwError $ CouldNotDeduce c''
     Just (cs', sols) -> do
-      (cs'', sols') <- solve kindScope tyNames kinds theory (cs' <> cs)
+      (cs'', sols') <- solve kindScope spans tyNames kinds theory (cs' <> cs)
       pure (cs'', composeSSubs sols' sols)
 
 entails ::
@@ -147,6 +148,7 @@ entails ::
   , Eq ty
   ) =>
   Map Text Kind ->
+  (ty -> Span) ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   (Size (Either SMeta sz), Constraint (Either TMeta ty)) ->
@@ -155,16 +157,16 @@ entails ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta sz))
     )
-entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
+entails kindScope spans tyNames kinds (antSize, ant) (consVar, cons) =
   case ant of
     -- antSize : forall (x : k). _
     CForall _ k a -> do
-      meta <- freshTMeta k
-      entails kindScope tyNames kinds (antSize, unvar (\() -> Left meta) id <$> a) (consVar, cons)
+      meta <- freshTMeta Unknown k
+      entails kindScope spans tyNames kinds (antSize, unvar (\() -> Left meta) id <$> a) (consVar, cons)
     -- antSize : _ -> _
     CImplies a b -> do
       bvar <- freshSMeta
-      (bAssumes, ssubs) <- entails kindScope tyNames kinds (Var $ Left bvar, b) (consVar, cons)
+      (bAssumes, ssubs) <- entails kindScope spans tyNames kinds (Var $ Left bvar, b) (consVar, cons)
       avar <- freshSMeta
       pure
         ( (avar, a) : bAssumes
@@ -175,7 +177,7 @@ entails kindScope tyNames kinds (antSize, ant) (consVar, cons) =
       case cons of
         CSized t' -> do
           st <- get
-          let res = runExcept $ runStateT (unifyType kindScope tyNames kinds (TypeM t') (TypeM t)) st
+          let res = runExcept $ runStateT (unifyType kindScope spans tyNames kinds (TypeM t') (TypeM t)) st
           case res of
             Left{} -> do
               empty
@@ -192,6 +194,7 @@ simplify ::
   , Ord ty
   ) =>
   Map Text Kind ->
+  (ty -> Span) ->
   (ty -> Either Int Text) ->
   (ty -> Kind) ->
   Theory (Either TMeta ty) ->
@@ -200,7 +203,7 @@ simplify ::
     ( [(SMeta, Constraint (Either TMeta ty))]
     , Map SMeta (Size (Either SMeta sz))
     )
-simplify kindScope tyNames kinds !theory (consVar, cons) =
+simplify kindScope spans tyNames kinds !theory (consVar, cons) =
   case cons of
     CForall m_n k a -> do
       ameta <- freshSMeta
@@ -210,6 +213,7 @@ simplify kindScope tyNames kinds !theory (consVar, cons) =
           (aAssumes, asubs) <-
             simplify
               kindScope
+              (unvar (\() -> {- TODO -} Unknown) spans)
               (unvar (\() -> maybe (Left 0) Right m_n) (first (+1) . tyNames))
               (unvar (\() -> k) kinds)
               (mapTy (fmap F) theory)
@@ -226,7 +230,7 @@ simplify kindScope tyNames kinds !theory (consVar, cons) =
     CImplies a b -> do
       ameta <- freshSMeta
       bmeta <- freshSMeta
-      (bAssumes, bsubs) <- simplify kindScope tyNames kinds (insertLocal a ameta theory) (bmeta, b)
+      (bAssumes, bsubs) <- simplify kindScope spans tyNames kinds (insertLocal a ameta theory) (bmeta, b)
       bAssumes' <- traverse (\assume -> (, assume) <$> freshSMeta) bAssumes
       pure
         ( (\(v, (_, c)) -> (v, CImplies a c)) <$> bAssumes'
@@ -247,7 +251,7 @@ simplify kindScope tyNames kinds !theory (consVar, cons) =
     CSized{} -> do
       m_res <-
         runMaybeT . asum $
-          (\(antVar, ant) -> entails kindScope tyNames kinds (antVar, ant) (consVar, cons)) <$>
+          (\(antVar, ant) -> entails kindScope spans tyNames kinds (antVar, ant) (consVar, cons)) <$>
           theoryToList theory
       case m_res of
         Nothing -> do

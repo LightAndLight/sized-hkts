@@ -12,7 +12,7 @@ import Data.Void (Void)
 import IR (Constraint(..), Kind(..))
 import Size (Size)
 import qualified Size
-import Syntax (Type(..))
+import Syntax (Type(..), Span(Unknown))
 
 builtins :: [(Constraint Void, Size Void)]
 builtins =
@@ -24,18 +24,18 @@ builtins =
 ptrSize :: (Constraint Void, Size Void)
 ptrSize =
   ( CForall Nothing KType $
-    CSized $ TApp TPtr (TVar $ B ())
+    CSized $ TApp Unknown (TPtr Unknown) (TVar $ B ())
   , Size.Word 8
   )
 
 boolSize :: (Constraint Void, Size Void)
 boolSize =
-  ( CSized TBool
+  ( CSized $ TBool Unknown
   , Size.Word 1
   )
 
 int32Size :: (Constraint Void, Size Void)
 int32Size =
-  ( CSized TInt32
+  ( CSized $ TInt32 Unknown
   , Size.Word 4
   )

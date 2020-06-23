@@ -89,12 +89,12 @@ typeSuffix ts =
     doTy ty =
       case ty of
         Syntax.TVar a -> absurd a
-        Syntax.TApp t1 t2 -> "TApp" <> doTy t1 <> doTy t2
-        Syntax.TInt32 -> "TInt32"
-        Syntax.TBool -> "TBool"
-        Syntax.TPtr -> "TPtr"
-        Syntax.TFun args -> "TFun" <> foldMap doTy args
-        Syntax.TName a -> a
+        Syntax.TApp _ t1 t2 -> "TApp" <> doTy t1 <> doTy t2
+        Syntax.TInt32{} -> "TInt32"
+        Syntax.TBool{} -> "TBool"
+        Syntax.TPtr{} -> "TPtr"
+        Syntax.TFun _ args -> "TFun" <> foldMap doTy args
+        Syntax.TName _ a -> a
 
 genType :: MonadState Code m => Syntax.Type Void -> m CType
 genType ty =
@@ -103,15 +103,15 @@ genType ty =
   in
     case t of
       Syntax.TVar a -> absurd a
-      Syntax.TFun args | [ret] <- ts ->
+      Syntax.TFun _ args | [ret] <- ts ->
         C.FunPtr <$>
         genType ret <*>
         traverse genType args
-      Syntax.TPtr | [ret] <- ts ->
+      Syntax.TPtr _ | [ret] <- ts ->
         C.Ptr <$> genType ret
-      Syntax.TInt32 -> pure C.Int32
-      Syntax.TBool -> pure C.Bool
-      Syntax.TName name -> do
+      Syntax.TInt32{} -> pure C.Int32
+      Syntax.TBool{} -> pure C.Bool
+      Syntax.TName _ name -> do
         -- let key = (IR.ODatatype, name, ts)
         let key = Key IR.ODatatype name ts
         m_code <- uses codeCompiledNames $ Map.lookup key
@@ -197,7 +197,7 @@ genDatatype adt ts =
       in
         Vector.zipWith (\n (m_n, t) -> (Maybe.fromMaybe n m_n, t)) numberedFieldNames fs
 
-    inst = (>>= unvar (ts Vector.!) absurd)
+    inst = (>>= unvar ((ts Vector.!) . Syntax.getIndex) absurd)
 
     correctSize name tyArgsLen =
       case compare (Vector.length ts) tyArgsLen of
@@ -285,6 +285,7 @@ sizeOfType kindScope global t =
         (_, solutions) <-
           solve
             kindScope
+            absurd
             absurd
             absurd
             (Theory { _thGlobal = global, _thLocal = mempty })
@@ -412,9 +413,9 @@ genConstructor (IR.Constructor name ctorSort tyArgs args retTy) tyArgs' =
         " (expected " <> show tyArgsLen <> ")"
       EQ -> do
         let
-          inst = unvar (tyArgs' Vector.!) absurd
+          inst = unvar ((tyArgs' Vector.!) . Syntax.getIndex) absurd
           args_inst = (fmap.fmap) (>>= inst) args
-          retTy_inst = retTy >>= inst
+          retTy_inst = retTy Syntax.Unknown >>= inst
 
         retTy_instGen <- genType retTy_inst
         args_inst' <-
@@ -461,7 +462,7 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
         " (expected " <> show tyArgsLen <> ")"
       EQ -> do
         let
-          inst = unvar (tyArgs' Vector.!) absurd
+          inst = unvar ((tyArgs' Vector.!) . Syntax.getIndex) absurd
           -- constraints_inst = IR.bindConstraint inst <$> _constraints
           args_inst = (fmap.fmap) (>>= inst) args
           retTy_inst = retTy >>= inst

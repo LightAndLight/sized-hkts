@@ -33,7 +33,7 @@ import Data.Void (Void, absurd)
 
 import Check.Datatype (HasDatatypeFields, HasDatatypeCtors, getConstructor, getFieldType)
 import Error.TypeError (TypeError(..))
-import Syntax (TMeta, TypeM, pattern TypeM, unTypeM)
+import Syntax (Span(Unknown), TMeta, TypeM, pattern TypeM, unTypeM, getIndex)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
@@ -68,8 +68,8 @@ instantiateScheme ::
     , TypeM ty
     )
 instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
-  tyArgMetas <- traverse (\(_, k) -> freshTMeta k) tyArgs
-  let placeMetas = unvar (Left . (tyArgMetas Vector.!)) absurd
+  tyArgMetas <- traverse (\(_, k) -> freshTMeta {- TODO -} Unknown k) tyArgs
+  let placeMetas = unvar (Left . (tyArgMetas Vector.!) . getIndex) absurd
   pure
     ( origin
     , tyArgMetas
@@ -78,8 +78,8 @@ instantiateScheme (IR.TypeScheme origin tyArgs constraints args retTy) = do
         mempty
         constraints
     , TypeM $
-      Syntax.TApp
-        (Syntax.TFun $ fmap placeMetas . snd <$> args)
+      Syntax.TApp {- TODO -} Unknown
+        (Syntax.TFun {- TODO -} Unknown $ fmap placeMetas . snd <$> args)
         (placeMetas <$> retTy)
     )
 
@@ -90,25 +90,26 @@ inferPattern ::
   , MonadError TypeError m
   , Ord ty
   ) =>
+  Span ->
   Text ->
   Vector Text ->
   m (Vector (TypeM ty), TypeM ty)
-inferPattern ctorName argNames = do
-  ctor <- getConstructor ctorName
+inferPattern sp ctorName argNames = do
+  ctor <- getConstructor sp ctorName
   case IR.ctorSort ctor of
-    IR.StructCtor -> throwError $ MatchingOnStruct ctorName
+    IR.StructCtor -> throwError $ MatchingOnStruct sp
     IR.EnumCtor{} -> do
       let
         expectedLength = length $ IR.ctorArgs ctor
         actualLength = length argNames
       case expectedLength == actualLength of
-        False -> throwError $ CtorArityMismatch ctorName expectedLength actualLength
+        False -> throwError $ CtorArityMismatch sp expectedLength actualLength
         True -> do
-          tyArgs <- traverse (\(_, k) -> freshTMeta k) $ IR.ctorTyArgs ctor
-          let inst = fmap $ unvar (Left . (tyArgs Vector.!)) absurd
+          tyArgs <- traverse (\(_, k) -> freshTMeta {- TODO -} Unknown k) $ IR.ctorTyArgs ctor
+          let inst = fmap $ unvar (Left . (tyArgs Vector.!) . getIndex) absurd
           pure
             ( TypeM . inst . snd <$> IR.ctorArgs ctor
-            , TypeM . inst $ IR.ctorRetTy ctor
+            , TypeM . inst $ IR.ctorRetTy ctor sp
             )
 
 inferExpr ::
@@ -121,13 +122,14 @@ inferExpr ::
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
+  (ty -> Span) ->
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
   (tm -> TypeM ty) ->
   Syntax.Expr tm ->
   m (InferResult ty tm)
-inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
+inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
   case expr of
     Syntax.Var a ->
       pure $
@@ -136,11 +138,11 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
       , irType = types a
       }
 
-    Syntax.Name name -> do
+    Syntax.Name sp name -> do
       case Map.lookup name letScope of
         Nothing ->
           case Map.lookup name tyScope of
-            Nothing -> throwError $ NotInScope name
+            Nothing -> throwError $ NotInScope sp
             Just scheme -> do
               (origin, metas, constraints, bodyTy) <- instantiateScheme scheme
               requiredConstraints <>= constraints
@@ -165,21 +167,21 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
             , irType = ty
             }
 
-    Syntax.Number n -> do
+    Syntax.Number sp n -> do
       if 0 <= n && n <= fromIntegral (maxBound::Int32)
       then
         pure $
         InferResult
         { irExpr = IR.Int32 (fromIntegral n)
-        , irType = TypeM Syntax.TInt32
+        , irType = TypeM $ Syntax.TInt32 sp
         }
-      else throwError $ OutOfBoundsInt32 n
+      else throwError $ OutOfBoundsInt32 sp
 
     Syntax.Let bindings body -> do
       (letScope', bindings') <-
         foldlM
           (\(acc, bs) (n, b) -> do
-             bResult <- inferExpr kindScope tyScope acc tyNames tmNames kinds types b
+             bResult <- inferExpr kindScope tyScope acc tySpans tyNames tmNames kinds types b
              requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType bResult)
              pure
                ( Map.insert n (irType bResult) acc
@@ -188,19 +190,19 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           bindings
-      bodyResult <- inferExpr kindScope tyScope letScope' tyNames tmNames kinds types body
+      bodyResult <- inferExpr kindScope tyScope letScope' tySpans tyNames tmNames kinds types body
       pure $
         InferResult
         { irExpr = IR.Let bindings' $ irExpr bodyResult
         , irType = irType bodyResult
         }
 
-    Syntax.Call fun args -> do
-      funResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types fun
+    Syntax.Call sp fun args -> do
+      funResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types fun
       (args', argTys) <-
         foldlM
           (\(as, atys) arg -> do
-             argResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types arg
+             argResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types arg
              pure
                ( Vector.snoc as $ irExpr argResult
                , Vector.snoc atys . unTypeM $ irType argResult
@@ -208,12 +210,13 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           args
-      retTy <- Syntax.TVar . Left <$> freshTMeta KType
+      retTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       unifyType
         kindScope
+        tySpans
         (Right . tyNames)
         kinds
-        (TypeM $ Syntax.TApp (Syntax.TFun argTys) retTy)
+        (TypeM $ Syntax.TApp sp (Syntax.TFun sp argTys) retTy)
         (irType funResult)
       pure $
         InferResult
@@ -221,37 +224,38 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         , irType = TypeM retTy
         }
 
-    Syntax.BTrue ->
+    Syntax.BTrue sp ->
       pure $
       InferResult
       { irExpr = IR.BTrue
-      , irType = TypeM Syntax.TBool
+      , irType = TypeM $ Syntax.TBool sp
       }
 
-    Syntax.BFalse ->
+    Syntax.BFalse sp ->
       pure $
       InferResult
       { irExpr = IR.BFalse
-      , irType = TypeM Syntax.TBool
+      , irType = TypeM $ Syntax.TBool sp
       }
 
-    Syntax.New a -> do
-      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
+    Syntax.New sp a -> do
+      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
       requiredConstraints <>= Set.singleton (IR.CSized . unTypeM $ irType aResult)
       pure $
         InferResult
         { irExpr = IR.New (irExpr aResult) (unTypeM $ irType aResult)
-        , irType = TypeM $ Syntax.TApp Syntax.TPtr (unTypeM $ irType aResult)
+        , irType = TypeM $ Syntax.TApp sp (Syntax.TPtr sp) (unTypeM $ irType aResult)
         }
 
-    Syntax.Deref a -> do
-      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
-      meta <- freshTMeta KType
+    Syntax.Deref sp a -> do
+      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      meta <- freshTMeta sp KType
       unifyType
         kindScope
+        tySpans
         (Right . tyNames)
         kinds
-        (TypeM $ Syntax.TApp Syntax.TPtr $ Syntax.TVar $ Left meta)
+        (TypeM $ Syntax.TApp sp (Syntax.TPtr sp) $ Syntax.TVar $ Left meta)
         (irType aResult)
       pure $
         InferResult
@@ -259,36 +263,37 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
         , irType = TypeM $ Syntax.TVar (Left meta)
         }
 
-    Syntax.Project a field -> do
-      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
+    Syntax.Project sp a field -> do
+      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
       aTy <- solveTMetas_Type id . unTypeM $ irType aResult
       let (t, ts) = Syntax.unApply aTy
       case t of
-        Syntax.TName n -> do
+        Syntax.TName sp' n -> do
           let field' = IR.parseProjection field
-          m_fieldType <- getFieldType n field'
+          m_fieldType <- getFieldType sp' n field'
           case m_fieldType of
-            Nothing -> throwError $ Doesn'tHaveField (tyNames <$> TypeM aTy) field
+            Nothing -> throwError $ Doesn'tHaveField sp (tyNames <$> TypeM aTy) field
             Just fieldType ->
               let
-                fieldType' = fieldType >>= unvar (ts !!) absurd
+                fieldType' = fieldType >>= unvar ((ts !!) . getIndex) absurd
               in
                 pure $
                 InferResult
                 { irExpr = IR.Project (irExpr aResult) field'
                 , irType = TypeM fieldType'
                 }
-        _ -> throwError $ Can'tInfer (tmNames <$> expr)
+        _ -> throwError $ Can'tInfer sp
 
-    Syntax.Match a cases -> do
-      aResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types a
-      resTy <- Syntax.TVar . Left <$> freshTMeta KType
+    Syntax.Match sp a cases -> do
+      aResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types a
+      resTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       caseExprs <-
         traverse
-           (\(Syntax.Case ctorName ctorArgs body) -> do
-              (ctorArgTypes, patternType) <- inferPattern ctorName ctorArgs
+           (\(Syntax.Case sp' ctorName ctorArgs body) -> do
+              (ctorArgTypes, patternType) <- inferPattern sp' ctorName ctorArgs
               unifyType
                 kindScope
+                tySpans
                 (Right . tyNames)
                 kinds
                 (irType aResult)
@@ -298,6 +303,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
                   kindScope
                   tyScope
                   letScope
+                  tySpans
                   tyNames
                   (unvar (ctorArgs Vector.!) tmNames)
                   kinds
@@ -305,6 +311,7 @@ inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr =
                   body
               unifyType
                 kindScope
+                tySpans
                 (Right . tyNames)
                 kinds
                 (TypeM resTy)
@@ -333,6 +340,7 @@ checkExpr ::
   Map Text Kind ->
   Map Text (TypeScheme Void) ->
   Map Text (TypeM ty) ->
+  (ty -> Span) ->
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
@@ -340,9 +348,9 @@ checkExpr ::
   Syntax.Expr tm ->
   TypeM ty ->
   m (CheckResult ty tm)
-checkExpr kindScope tyScope letScope tyNames tmNames kinds types expr ty = do
-  exprResult <- inferExpr kindScope tyScope letScope tyNames tmNames kinds types expr
-  unifyType kindScope (Right . tyNames) kinds ty (irType exprResult)
+checkExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr ty = do
+  exprResult <- inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr
+  unifyType kindScope tySpans (Right . tyNames) kinds ty (irType exprResult)
   pure $
     CheckResult
     { crExpr = irExpr exprResult

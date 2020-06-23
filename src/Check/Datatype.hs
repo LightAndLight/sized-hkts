@@ -46,7 +46,7 @@ import Error.TypeError (TypeError(..))
 import IR (Constraint(..), KMeta, Kind(..), substKMeta)
 import qualified IR
 import Size (Size(..), plusSize, maxSize, sizeConstraintFor)
-import Syntax (Type(..), TMeta, pattern TypeM)
+import Syntax (Index(..), indexSpan, getIndex, Span(..), Type(..), TMeta, pattern TypeM)
 import qualified Syntax
 import Unify.KMeta (HasKindMetas, freshKMeta, solveKMetas)
 import Unify.Kind (unifyKind)
@@ -62,25 +62,27 @@ getConstructor ::
   ( MonadState s m, HasDatatypeCtors s
   , MonadError TypeError m
   ) =>
+  Span ->
   Text ->
   m IR.Constructor
-getConstructor ctorName = do
+getConstructor sp ctorName = do
   m_ctor <- uses datatypeCtors $ Map.lookup ctorName
   case m_ctor of
-    Nothing -> throwError $ CtorNotInScope ctorName
+    Nothing -> throwError $ CtorNotInScope sp
     Just ctor -> pure ctor
 
 getFieldType ::
   ( MonadState s m, HasDatatypeFields s
   , MonadError TypeError m
   ) =>
+  Span ->
   Text ->
   IR.Projection ->
-  m (Maybe (Type (Var Int Void)))
-getFieldType tyName prj = do
+  m (Maybe (Type (Var Index Void)))
+getFieldType sp tyName prj = do
   m_fs <- uses datatypeFields $ Map.lookup tyName
   case m_fs of
-    Nothing -> throwError $ TNotInScope tyName
+    Nothing -> throwError $ TNotInScope sp
     Just fs ->
       pure $ case prj of
         IR.Numeric ix ->
@@ -94,7 +96,7 @@ getFieldType tyName prj = do
 
 makeSizeTerm ::
   forall s m.
-  ( MonadState (s (Var Int Void)) m
+  ( MonadState (s (Var Index Void)) m
   , FilterTypes s
   , HasTypeMetas s
   , forall x. HasKindMetas (s x)
@@ -105,13 +107,13 @@ makeSizeTerm ::
   Map Text Kind ->
   Vector Text ->
   Vector Kind ->
-  Map (Constraint (Var Int Void)) SMeta ->
-  Vector (Type (Var Int Void)) ->
+  Map (Constraint (Var Index Void)) SMeta ->
+  Vector (Type (Var Index Void)) ->
   m (Set SMeta, Size (Either SMeta Void))
 makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
   global <- use globalTheory
   let
-    theory :: Theory (Either TMeta (Var Int Void))
+    theory :: Theory (Either TMeta (Var Index Void))
     theory =
       Theory
       { _thGlobal = global
@@ -119,20 +121,24 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
       }
   foldlM
     (\(usedSizeMetas, sz) a -> do
-        sz' <- typeSizeTerm theory a
-        pure (usedSizeMetas <> foldMap (either Set.singleton absurd) sz', plusSize sz sz')
+       sz' <- typeSizeTerm theory a
+       pure (usedSizeMetas <> foldMap (either Set.singleton absurd) sz', plusSize sz sz')
     )
     (mempty, Word 0)
     argTypes
   where
-    typeSizeTerm :: Theory (Either TMeta (Var Int Void)) -> Type (Var Int Void) -> m (Size (Either SMeta Void))
+    typeSizeTerm ::
+      Theory (Either TMeta (Var Index Void)) ->
+      Type (Var Index Void) ->
+      m (Size (Either SMeta Void))
     typeSizeTerm theory t = do
       placeholder <- freshSMeta
       (_assumes, subs) <-
         solve
           kindScope
-          (unvar (Right . (paramNames Vector.!)) absurd)
-          (unvar (paramKinds Vector.!) absurd)
+          (unvar indexSpan absurd)
+          (unvar (Right . (paramNames Vector.!) . getIndex) absurd)
+          (unvar ((paramKinds Vector.!) . getIndex) absurd)
           theory
           [(placeholder, CSized $ Right <$> t)]
       pure $ findSMeta subs placeholder
@@ -140,12 +146,12 @@ makeSizeTerm kindScope paramNames paramKinds assumedConstraints argTypes = do
 -- | Given some assumptions and an instance head, construct an axiom type
 makeSizeConstraint ::
   Vector Kind ->
-  Vector (Constraint (Var Int Void)) ->
-  Type (Var Int Void) ->
+  Vector (Constraint (Var Index Void)) ->
+  Type (Var Index Void) ->
   Constraint Void
 makeSizeConstraint paramKinds as =
   validation (error . ("makeSizeConstraint: un-abstracted bound variable: " <>) . show) id .
-  traverse (unvar (Failure . Set.singleton) absurd) .
+  traverse (unvar (Failure . Set.singleton . getIndex) absurd) .
   go mempty (Vector.toList as)
   where
     indices :: Vector Int
@@ -155,15 +161,15 @@ makeSizeConstraint paramKinds as =
     -- if no abstraction was done, returns a Nothing.
     abstractVar ::
       Int ->
-      Constraint (Var Int Void) ->
-      Maybe (Constraint (Var () (Var Int Void)))
+      Constraint (Var Index Void) ->
+      Maybe (Constraint (Var () (Var Index Void)))
     abstractVar n c =
       let
         (res, abstracted) =
           runWriter $ do
           traverse
             (unvar
-              (\n' -> if n == n' then B () <$ tell (Any True) else pure . F $ B n')
+              (\n' -> if n == getIndex n' then B () <$ tell (Any True) else pure . F $ B n')
               absurd
             )
             c
@@ -174,8 +180,8 @@ makeSizeConstraint paramKinds as =
 
     abstractVars ::
       Set Int ->
-      Constraint (Var Int Void) ->
-      Constraint (Var Int Void)
+      Constraint (Var Index Void) ->
+      Constraint (Var Index Void)
     abstractVars ns c =
       let
         toAbstractOver = Vector.filter (`Set.notMember` ns) indices
@@ -195,9 +201,9 @@ makeSizeConstraint paramKinds as =
     -- e.g. `forall a. C a => forall b. C b => C (f a b)` instead of `forall a b. C a => C b => C (f a b)`
     go ::
       Set Int -> -- free variables that we've seen so far
-      [Constraint (Var Int Void)] ->
-      Type (Var Int Void) ->
-      Constraint (Var Int Void)
+      [Constraint (Var Index Void)] ->
+      Type (Var Index Void) ->
+      Constraint (Var Index Void)
     go !freeVars assumes hd =
       case assumes of
         [] ->
@@ -207,7 +213,7 @@ makeSizeConstraint paramKinds as =
           let
             hd' =
               CImplies a $
-              go (freeVars <> foldMap (unvar Set.singleton absurd) a) rest hd
+              go (freeVars <> foldMap (unvar (Set.singleton . getIndex) absurd) a) rest hd
           in
             abstractVars freeVars hd'
 
@@ -218,7 +224,7 @@ makeSizeConstraint paramKinds as =
 -- * sizeterm
 checkADT ::
   forall s m.
-  ( MonadState (s (Var Int Void)) m
+  ( MonadState (s (Var Index Void)) m
   , FilterTypes s
   , HasTypeMetas s
   , forall x. HasKindMetas (s x)
@@ -229,7 +235,7 @@ checkADT ::
   Map Text Kind ->
   Text -> -- name
   Vector Text -> -- type parameters
-  Syntax.Ctors (Var Int Void) -> -- constructors
+  Syntax.Ctors (Var Index Void) -> -- constructors
   m (IR.Datatype, Kind, Constraint Void, Size Void)
 checkADT kScope datatypeName paramNames ctors = do
   datatypeKind <- KVar <$> freshKMeta
@@ -240,7 +246,7 @@ checkADT kScope datatypeName paramNames ctors = do
 
   ks <- traverse (solveKMetas . KVar) paramMetas
   let datatypeKind' = foldr KArr KType ks
-  unifyKind datatypeKind' datatypeKind
+  unifyKind {- TODO -} Unknown datatypeKind' datatypeKind
   datatypeKind'' <-
     substKMeta (const KType) <$>
     solveKMetas datatypeKind'
@@ -248,14 +254,14 @@ checkADT kScope datatypeName paramNames ctors = do
   sizeMetas <- Vector.replicateM (Vector.length paramNames) freshSMeta
   paramKinds <- traverse (fmap (substKMeta $ const KType) . solveKMetas . KVar) paramMetas
   let
-    assumedConstraintsFwd :: Map (Constraint (Var Int Void)) SMeta
-    assumedConstraintsBwd :: Map SMeta (Constraint (Var Int Void))
+    assumedConstraintsFwd :: Map (Constraint (Var Index Void)) SMeta
+    assumedConstraintsBwd :: Map SMeta (Constraint (Var Index Void))
     (assumedConstraintsFwd, assumedConstraintsBwd) =
       Vector.ifoldl'
         (\(accFwd, accBwd) ix s ->
            let
              k = paramKinds Vector.! ix
-             c = unvar (\() -> B ix) F <$> sizeConstraintFor k
+             c = unvar (\() -> B $ Index {- TODO -} Unknown ix) F <$> sizeConstraintFor k
            in
              ( Map.insert c s accFwd
              , Map.insert s c accBwd
@@ -275,7 +281,7 @@ checkADT kScope datatypeName paramNames ctors = do
       ctors
 
   let
-    usedConstraints :: Vector (Constraint (Var Int Void))
+    usedConstraints :: Vector (Constraint (Var Index Void))
     usedConstraints =
       Vector.map (assumedConstraintsBwd Map.!) $
       Vector.filter (`Set.member` usedSizeMetas) sizeMetas
@@ -310,17 +316,17 @@ checkADT kScope datatypeName paramNames ctors = do
           , sz'
           )
   where
-    fullyApplied :: Type (Var Int Void)
+    fullyApplied :: Type (Var Index Void)
     fullyApplied =
       Vector.foldl
-        (\acc ix -> TApp acc (TVar $ B ix))
-        (TName datatypeName)
+        (\acc ix -> TApp {- TODO -} Unknown acc (TVar . B $ Index {- TODO -} Unknown ix))
+        (TName {- TODO -} Unknown datatypeName)
         [0..length paramNames - 1]
 
     adtKinds ::
       Map Text Kind ->
       Vector KMeta ->
-      Syntax.Ctors (Var Int Void) -> -- constructors
+      Syntax.Ctors (Var Index Void) -> -- constructors
       m ()
     adtKinds kindScope paramMetas c =
       case c of
@@ -331,7 +337,8 @@ checkADT kScope datatypeName paramNames ctors = do
             (\ty ->
                 checkKind
                   kindScope
-                  (unvar (paramKinds Vector.!) absurd)
+                  (unvar indexSpan absurd)
+                  (unvar ((paramKinds Vector.!) . getIndex) absurd)
                   (TypeM $ Right <$> ty)
                   KType
             )
@@ -341,11 +348,11 @@ checkADT kScope datatypeName paramNames ctors = do
     adtSizeTerm ::
       Map Text Kind ->
       Vector Kind ->
-      Map (Constraint (Var Int Void)) SMeta ->
+      Map (Constraint (Var Index Void)) SMeta ->
       Int ->
       Set SMeta ->
       Size (Either SMeta Void) ->
-      Syntax.Ctors (Var Int Void) -> -- constructors
+      Syntax.Ctors (Var Index Void) -> -- constructors
       m (Set SMeta, Size (Either SMeta Void))
     adtSizeTerm kindScope paramKinds assumedConstraints !ctorCount !usedConstraints sz c =
       case c of
@@ -359,7 +366,8 @@ checkADT kScope datatypeName paramNames ctors = do
             (\ty ->
                 checkKind
                   kindScope
-                  (unvar (paramKinds Vector.!) absurd)
+                  (unvar indexSpan absurd)
+                  (unvar ((paramKinds Vector.!) . getIndex) absurd)
                   (TypeM $ Right <$> ty)
                   KType
             )

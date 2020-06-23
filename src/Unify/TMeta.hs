@@ -21,11 +21,11 @@ import qualified Data.Map as Map
 
 import IR (Kind(..))
 import qualified IR
-import Syntax (TMeta(..), TypeM, unTypeM, Type(..))
+import Syntax (Span, TMeta(..), TypeM, unTypeM, Type(..))
 import Unify.KMeta (HasKindMetas, solveKMetas)
 
 class HasTypeMetas s where
-  nextTMeta :: Lens' (s ty) TMeta
+  nextTMeta :: Lens' (s ty) Int
   tmetaKinds :: Lens' (s ty) (Map TMeta Kind)
   tmetaSolutions :: Lens' (s ty) (Map TMeta (TypeM ty))
 
@@ -42,12 +42,12 @@ getTMetaKind v = do
   ks <- use tmetaKinds
   pure $ Map.lookup v ks
 
-freshTMeta :: (MonadState (s ty) m, HasTypeMetas s) => Kind -> m TMeta
-freshTMeta k = do
-  TMeta t <- use nextTMeta
-  nextTMeta .= TMeta (t+1)
-  tmetaKinds %= Map.insert (TMeta t) k
-  pure $ TMeta t
+freshTMeta :: (MonadState (s ty) m, HasTypeMetas s) => Span -> Kind -> m TMeta
+freshTMeta sp k = do
+  t <- use nextTMeta
+  nextTMeta .= t+1
+  tmetaKinds %= Map.insert (TMeta sp t) k
+  pure $ TMeta sp t
 
 solveTMetas_Type ::
   (MonadState (s ty) m, HasTypeMetas s) =>
@@ -71,12 +71,12 @@ solveTMetas_Type d = go d
                 (pure $ TVar $ Left m)
                 (go depth . unTypeM . fmap depth)
             Right x -> pure $ TVar $ Right x
-        TApp a b -> TApp <$> go depth a <*> go depth b
-        TInt32 -> pure TInt32
-        TBool -> pure TBool
-        TPtr -> pure TPtr
-        TFun ts -> TFun <$> traverse (go depth) ts
-        TName n -> pure $ TName n
+        TApp sp a b -> TApp sp <$> go depth a <*> go depth b
+        TInt32 sp -> pure $ TInt32 sp
+        TBool sp -> pure $ TBool sp
+        TPtr sp -> pure $ TPtr sp
+        TFun sp ts -> TFun sp <$> traverse (go depth) ts
+        TName sp n -> pure $ TName sp n
 
 solveMetas_Constraint ::
   (MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)) =>

@@ -14,7 +14,7 @@ import Data.Text (Text)
 
 import Error.TypeError (TypeError(..))
 import IR (Kind(..))
-import Syntax (TypeM, pattern TypeM, unTypeM)
+import Syntax (Span, TypeM, pattern TypeM, unTypeM)
 import qualified Syntax
 import Unify.KMeta (HasKindMetas, freshKMeta)
 import Unify.Kind (unifyKind)
@@ -25,13 +25,15 @@ checkKind ::
   , MonadError TypeError m
   ) =>
   Map Text Kind ->
+  (ty -> Span) ->
   (ty -> Kind) ->
   TypeM ty ->
   Kind ->
   m ()
-checkKind kindScope kinds ty k = do
+checkKind kindScope spans kinds ty k = do
   k' <- inferKind kindScope kinds ty
-  unifyKind k k'
+  let sp = Syntax.typeSpan (either Syntax.tmetaSpan spans) $ unTypeM ty
+  unifyKind sp k k'
 
 inferKind ::
   ( MonadState (s ty) m, HasTypeMetas s, HasKindMetas (s ty)
@@ -49,19 +51,19 @@ inferKind kindScope kinds ty =
         Nothing -> error $ "Missing " <> show mk
         Just k -> pure k
     Syntax.TVar (Right a) -> pure $ kinds a
-    Syntax.TApp a b -> do
+    Syntax.TApp sp a b -> do
       aK <- inferKind kindScope kinds (TypeM a)
       bK <- inferKind kindScope kinds (TypeM b)
       meta <- freshKMeta
       let expected = KArr bK (KVar meta)
-      unifyKind expected aK
+      unifyKind sp expected aK
       pure $ KVar meta
-    Syntax.TInt32 -> pure KType
-    Syntax.TBool -> pure KType
-    Syntax.TPtr -> pure $ KArr KType KType
+    Syntax.TInt32{} -> pure KType
+    Syntax.TBool{} -> pure KType
+    Syntax.TPtr{} -> pure $ KArr KType KType
     Syntax.TFun{} -> pure $ KArr KType KType
-    Syntax.TName n ->
+    Syntax.TName sp n ->
       case Map.lookup n kindScope of
-        Nothing -> throwError $ TNotInScope n
+        Nothing -> throwError $ TNotInScope sp
         Just k -> pure k
 

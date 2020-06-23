@@ -96,7 +96,7 @@ sizeConstraintFor = go [] (B ())
         KType ->
           IR.CSized $
           foldl
-            (\acc v -> Syntax.TApp acc $ Syntax.TVar v)
+            (\acc v -> Syntax.TApp Syntax.Unknown acc $ Syntax.TVar v)
             (Syntax.TVar x)
             quants
         KArr a b ->

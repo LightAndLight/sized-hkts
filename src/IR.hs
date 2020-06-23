@@ -9,13 +9,14 @@ module IR where
 import Bound.Var (Var(..), unvar)
 import Control.Lens.Setter (over, mapped)
 import Control.Lens.Tuple (_1)
-import Data.Bifunctor (bimap)
+import Data.Bifunctor (bimap, first)
 import Data.Deriving (deriveEq1, deriveShow1, deriveEq2, deriveShow2)
 import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, showsPrec1)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void)
@@ -23,7 +24,7 @@ import Data.Word (Word8, Word64)
 import Data.Int (Int32)
 import qualified Data.Text.Read as Text (decimal)
 
-import Syntax (Type(..))
+import Syntax (Index(..), Span(..), Type(..), prettyType)
 
 data Projection
   = Numeric Word64
@@ -106,8 +107,24 @@ bindType_Expr f e =
 newtype KMeta = KMeta Int
   deriving (Eq, Ord, Show)
 
+prettyKMeta :: KMeta -> Text
+prettyKMeta (KMeta n) = Text.pack $ '?' : show n
+
 data Kind = KType | KArr Kind Kind | KVar KMeta
   deriving (Eq, Ord, Show)
+
+prettyKind :: Kind -> Text
+prettyKind k =
+  case k of
+    KType -> "Type"
+    KArr a b ->
+      (case a of
+         KType -> ("(" <>) . (<> ")")
+         _ -> id
+      ) (prettyKind a) <>
+      " -> " <>
+      prettyKind b
+    KVar v -> prettyKMeta v
 
 foldKMeta :: Monoid m => (KMeta -> m) -> Kind -> m
 foldKMeta f k =
@@ -134,6 +151,34 @@ instance Eq a => Eq (Constraint a) where; (==) = eq1
 deriving instance Ord a => Ord (Constraint a)
 instance Show a => Show (Constraint a) where; showsPrec = showsPrec1
 
+prettyConstraint :: (a -> Either Int Text) -> Constraint a -> Text
+prettyConstraint var c =
+  case c of
+    CSized t ->
+      "Sized " <>
+      (case t of
+         TApp{} -> ("(" <>) . (<> ")")
+         _ -> id
+      ) (prettyType (either (Text.pack . ('#' :) . show) id . var) t)
+    CForall mName k rest ->
+      "forall (" <>
+      Maybe.fromMaybe "_" mName <>
+      " : " <>
+      prettyKind k <>
+      ")." <>
+      prettyConstraint
+        (unvar (\() -> maybe (Left 0) Right mName) (first (+1) . var))
+        rest
+    CImplies a b ->
+      (case a of
+         CForall{} -> ("(" <>) . (<> ")")
+         CImplies{} -> ("(" <>) . (<> ")")
+         _ -> id
+      )
+      (prettyConstraint var a) <>
+      " => " <>
+      prettyConstraint var b
+
 bindConstraint :: (a -> Type b) -> Constraint a -> Constraint b
 bindConstraint f c =
   case c of
@@ -145,12 +190,12 @@ data Function
   = Function
   { funcName :: Text
   , funcTyArgs :: Vector (Text, Kind)
-  , funcConstraints :: Vector (Constraint (Var Int Void)) -- indices from funcTyArgs
-  , funcArgs :: Vector (Text, Type (Var Int Void)) -- indices from funcTyArgs
-  , funcRetTy :: Type (Var Int Void) -- indices from funcTyArgs
+  , funcConstraints :: Vector (Constraint (Var Index Void)) -- indices from funcTyArgs
+  , funcArgs :: Vector (Text, Type (Var Index Void)) -- indices from funcTyArgs
+  , funcRetTy :: Type (Var Index Void) -- indices from funcTyArgs
   , funcBody ::
       Expr
-        (Var Int Void) -- indices from funcTyArgs
+        (Var Index Void) -- indices from funcTyArgs
         (Var Int Void) -- indices from funcArgs
   } deriving (Eq, Show)
 
@@ -164,9 +209,9 @@ data Constructor
   { ctorName :: Text
   , ctorSort :: CtorSort
   , ctorTyArgs :: Vector (Text, Kind)
-  , ctorArgs :: Vector (Maybe Text, Type (Var Int Void))
-  , ctorRetTy :: Type (Var Int Void)
-  } deriving (Eq, Show)
+  , ctorArgs :: Vector (Maybe Text, Type (Var Index Void)) {- TODO: make this depend on span -}
+  , ctorRetTy :: Span -> Type (Var Index Void)
+  }
 
 data Datatype
   = Empty
@@ -176,17 +221,17 @@ data Datatype
   | Struct
   { datatypeName :: Text
   , datatypeTyArgs :: Vector (Text, Kind)
-  , structFields :: Vector (Maybe Text, Type (Var Int Void))
+  , structFields :: Vector (Maybe Text, Type (Var Index Void))
   }
   | Enum
   { datatypeName :: Text
   , datatypeTyArgs :: Vector (Text, Kind)
-  , enumCtors :: Vector (Text, Vector (Maybe Text, Type (Var Int Void)))
+  , enumCtors :: Vector (Text, Vector (Maybe Text, Type (Var Index Void)))
   } deriving (Eq, Show)
 
 data Fields
-  = Unnamed (Vector (Type (Var Int Void)))
-  | Named (Map Text (Type (Var Int Void)))
+  = Unnamed (Vector (Type (Var Index Void)))
+  | Named (Map Text (Type (Var Index Void)))
   deriving Show
 
 makeDatatypeFields :: Datatype -> Maybe Fields
@@ -196,6 +241,7 @@ makeDatatypeFields adt =
     Struct _ _ fs -> Just . either (Unnamed . Vector.fromList) Named $ namedOrUnnamed fs
     Enum{} -> Nothing
   where
+    namedOrUnnamed :: Vector (Maybe Text, a) -> Either [a] (Map Text a)
     namedOrUnnamed =
       Maybe.fromJust .
       foldr
@@ -228,9 +274,9 @@ data TypeScheme ty
   = TypeScheme
   { schemeOrigin :: Origin
   , schemeTyArgs :: Vector (Text, Kind)
-  , schemeConstraints :: Vector (Constraint (Var Int ty)) -- indices from schemeTyArgs
-  , schemeArgs :: Vector (Maybe Text, Type (Var Int ty)) -- indices from schemeTyArgs
-  , schemeRetTy :: Type (Var Int ty) -- indices from schemeTyArgs
+  , schemeConstraints :: Vector (Constraint (Var Index ty)) -- indices from schemeTyArgs
+  , schemeArgs :: Vector (Maybe Text, Type (Var Index ty)) -- indices from schemeTyArgs
+  , schemeRetTy :: Type (Var Index ty) -- indices from schemeTyArgs
   }
 deriveEq1 ''TypeScheme
 deriveShow1 ''TypeScheme
@@ -252,18 +298,19 @@ datatypeConstructors adt =
         , ctorTyArgs = params
         , ctorArgs = fields
         , ctorRetTy =
+            \sp ->
             foldl @[]
-              (\a b -> TApp a (TVar $ B b))
-              (TName name)
+              (\a b -> TApp sp a (TVar . B $ Index Unknown b))
+              (TName sp name)
               [0..length params-1]
         }
       ]
     Enum name params ctors ->
       let
-        retTy =
+        retTy sp =
           foldl @[]
-            (\a b -> TApp a (TVar $ B b))
-            (TName name)
+            (\a b -> TApp sp a (TVar . B $ Index sp b))
+            (TName sp name)
             [0..length params-1]
       in
         (\(tag, (cn, fields)) ->
@@ -284,14 +331,13 @@ constructorToTypeScheme (Constructor _ _ tyArgs args retTy) =
   , schemeTyArgs = tyArgs
   , schemeConstraints = []
   , schemeArgs = args
-  , schemeRetTy = retTy
+  , schemeRetTy = retTy {- TODO -} Unknown
   }
 
 data Declaration
   = DData Datatype
   | DCtor Constructor
   | DFunc Function
-  deriving Show
 
 declOrigin :: Declaration -> Origin
 declOrigin d =
