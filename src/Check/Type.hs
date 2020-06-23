@@ -20,7 +20,7 @@ import Control.Lens.Setter ((<>=))
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState)
 import Data.Bitraversable (bitraverse)
-import Data.Foldable (foldlM, foldl')
+import Data.Foldable (foldlM, foldl', traverse_)
 import Data.Int (Int32)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -210,14 +210,26 @@ inferExpr kindScope tyScope letScope tySpans tyNames tmNames kinds types expr =
           )
           (mempty, mempty)
           args
+      argTyMetas <- Vector.replicateM (Vector.length argTys) (Syntax.TVar . Left <$> freshTMeta sp KType)
       retTy <- Syntax.TVar . Left <$> freshTMeta sp KType
       unifyType
         kindScope
         tySpans
         (Right . tyNames)
         kinds
-        (TypeM $ Syntax.TApp sp (Syntax.TFun sp argTys) retTy)
+        (TypeM $ Syntax.TApp sp (Syntax.TFun sp argTyMetas) retTy)
         (irType funResult)
+      traverse_
+        (\(argTyMeta, argTy) ->
+          unifyType
+            kindScope
+            tySpans
+            (Right . tyNames)
+            kinds
+            (TypeM argTyMeta)
+            (TypeM argTy)
+        )
+        (Vector.zip argTyMetas argTys)
       pure $
         InferResult
         { irExpr = IR.Call (irExpr funResult) args' retTy

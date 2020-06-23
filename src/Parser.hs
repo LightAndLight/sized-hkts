@@ -46,22 +46,16 @@ newlines =
     )
 
 parens :: Parser s a -> Parser s a
-parens = Parser.between (Parser.char '(') (Parser.char ')' <* Parser.spaces)
+parens = Parser.between (Parser.char '(') (Parser.char ')')
 
 braces :: Parser s a -> Parser s a
-braces = Parser.between (Parser.char '{') (Parser.char '}' <* Parser.spaces)
+braces = Parser.between (Parser.char '{') (Parser.char '}')
 
 angles :: Parser s a -> Parser s a
-angles = Parser.between (Parser.char '<') (Parser.char '>' <* Parser.spaces)
+angles = Parser.between (Parser.char '<') (Parser.char '>')
 
 ident :: Parser s Text
-ident = Parser.takeWhile1 Parser.pLower <?> "identifier"
-
-ctor :: Parser s Text
-ctor = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "constructor"
-
-tyCtor :: Parser s Text
-tyCtor = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "type constructor"
+ident = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "identifier"
 
 expr :: forall s a. (Text -> Maybe a) -> Parser s (Expr a)
 expr abstract =
@@ -123,7 +117,7 @@ expr abstract =
     case_ = do
       (sp, (c, as)) <-
         Parser.spanned $
-        (,) <$> ctor <*> parens (Vector.fromList <$> commasep ident)
+        (,) <$> ident <*> parens (Vector.fromList <$> commasep ident)
       _ <- spaces *> Parser.symbol "=>" *> spaces
       e <- expr (\n -> B <$> Vector.findIndex (n ==) as <|> F <$> abstract n)
       pure $ Case (Known sp) c as e
@@ -153,7 +147,7 @@ type_ abstract = app
          parens (Parser.sepBy (snd <$> type_ abstract) (Parser.char ',' <* spaces))
         ) <|>
       parens (snd <$> type_ abstract) <|>
-      (\(sp, i) -> maybe (TName (Known sp) i) TVar $ abstract sp i) <$> Parser.spanned ctor <* spaces
+      (\(sp, i) -> maybe (TName (Known sp) i) TVar $ abstract sp i) <$> Parser.spanned ident <* spaces
 
     app =
       foldl
@@ -168,12 +162,12 @@ datatype =
   where
     struct = do
       Parser.symbol "struct" <* Parser.char ' ' <* spaces
-      tName <- ctor <* spaces
+      tName <- ident <* spaces
       tArgs <- Vector.fromList <$> many (ident <* spaces)
       _ <- Parser.char '=' <* spaces
       c <-
         (\n as -> Ctor n (Vector.fromList as) End) <$>
-        ctor <*>
+        ident <*>
         parens
           (Parser.sepBy
              (fmap snd . type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
@@ -182,19 +176,20 @@ datatype =
       pure $ ADT tName tArgs c
     enum = do
       Parser.symbol "enum" <* Parser.char ' ' <* spaces
-      tName <- tyCtor <* spaces
+      tName <- ident <* spaces
       tArgs <- Vector.fromList <$> many (ident <* spaces)
       cs <-
         braces $
         foldr (\(n, as) -> Ctor n (Vector.fromList as)) End <$ spaces <*>
         Parser.sepBy
           ((,) <$>
-           ctor <*>
+           ident <*>
            parens
              (Parser.sepBy
                (fmap snd . type_ $ \sp v -> B . Index (Known sp) <$> Vector.elemIndex v tArgs)
                (Parser.char ',' <* spaces)
-             )
+             ) <*
+            spaces
           )
           (Parser.char ',' <* spaces)
       pure $ ADT tName tArgs cs
