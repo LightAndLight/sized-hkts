@@ -135,7 +135,7 @@ expr abstract =
        deref <* spaces <*>
        Parser.between
          (Parser.char '{' *> newlines)
-         (Parser.char '}')
+         (newlines *> Parser.char '}')
          (Vector.fromList <$> Parser.sepBy case_ (Parser.char ',' <* newlines))
       )
 
@@ -204,9 +204,11 @@ function = do
   Parser.symbol "fn" <* Parser.char ' ' <* spaces
   name <- ident
   tArgs <-
-    angles $
-    Vector.fromList <$>
-    Parser.sepBy ident (Parser.char ',' *> spaces)
+    angles
+      (Vector.fromList <$>
+      Parser.sepBy ident (Parser.char ',' *> spaces)
+      ) <|>
+    pure mempty
   let abstractTy sp v = B . Index (Known sp) <$> Vector.elemIndex v tArgs
   args <-
     parens $
