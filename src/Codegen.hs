@@ -414,7 +414,7 @@ genConstructor (IR.Constructor name ctorSort tyArgs args retTy) tyArgs' =
       EQ -> do
         let
           inst = unvar ((tyArgs' Vector.!) . Syntax.getIndex) absurd
-          args_inst = (fmap.fmap) (>>= inst) args
+          args_inst = (fmap.fmap) (\f -> f Syntax.Unknown >>= inst) args
           retTy_inst = retTy Syntax.Unknown >>= inst
 
         retTy_instGen <- genType retTy_inst

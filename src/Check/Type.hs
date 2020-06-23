@@ -18,12 +18,11 @@ where
 import Bound.Var (unvar)
 import Control.Lens.Getter (view)
 import Control.Lens.Lens (Lens')
-import Control.Lens.Setter ((.~), (<>=) )
+import Control.Lens.Setter ((<>=) )
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.State.Strict (MonadState)
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (foldlM, foldl', traverse_)
-import Data.Function ((&))
 import Data.Int (Int32)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -36,7 +35,7 @@ import Data.Void (Void, absurd)
 
 import Check.Datatype (HasDatatypeFields, HasDatatypeCtors, getConstructor, getFieldType)
 import Error.TypeError (TypeError(..))
-import Syntax (Span(Unknown), TMeta, TypeM, pattern TypeM, unTypeM, getIndex, typemSpan)
+import Syntax (Span(Unknown), TMeta, TypeM, pattern TypeM, unTypeM, getIndex)
 import qualified Syntax
 import IR (Kind(..), TypeScheme)
 import qualified IR
@@ -96,7 +95,7 @@ inferPattern ::
   Span ->
   Text ->
   Vector Text ->
-  m (Vector (TypeM ty), TypeM ty)
+  m (Vector (Span -> TypeM ty), TypeM ty)
 inferPattern sp ctorName argNames = do
   ctor <- getConstructor sp ctorName
   case IR.ctorSort ctor of
@@ -111,7 +110,7 @@ inferPattern sp ctorName argNames = do
           tyArgs <- traverse (\(_, k) -> freshTMeta {- TODO -} Unknown k) $ IR.ctorTyArgs ctor
           let inst = fmap $ unvar (Left . (tyArgs Vector.!) . getIndex) absurd
           pure
-            ( TypeM . inst . snd <$> IR.ctorArgs ctor
+            ( (\f -> TypeM . inst . f) . snd <$> IR.ctorArgs ctor
             , TypeM . inst $ IR.ctorRetTy ctor sp
             )
 
@@ -130,7 +129,7 @@ inferExpr ::
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
-  (tm -> TypeM ty) ->
+  (tm -> Span -> TypeM ty) ->
   Syntax.Expr tm ->
   m (InferResult ty tm)
 inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types expr =
@@ -139,7 +138,7 @@ inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types
       pure $
       InferResult
       { irExpr = IR.Var a
-      , irType = types a & typemSpan tySpans .~ view tmSpans a
+      , irType = types a (view tmSpans a)
       }
 
     Syntax.Name sp name -> do
@@ -362,7 +361,7 @@ checkExpr ::
   (ty -> Text) ->
   (tm -> Text) ->
   (ty -> Kind) ->
-  (tm -> TypeM ty) ->
+  (tm -> Span -> TypeM ty) ->
   Syntax.Expr tm ->
   TypeM ty ->
   m (CheckResult ty tm)

@@ -91,7 +91,14 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
           (unvar ((tyArgs Vector.!) . Syntax.getIndex) absurd)
           (unvar (fst . (args Vector.!) . Syntax.getIndex) absurd)
           (unvar ((tyArgKinds Vector.!) . Syntax.getIndex) absurd)
-          (unvar ((args' Vector.!) . Syntax.getIndex) absurd)
+          (unvar
+             (\ix sp ->
+                (args' Vector.! Syntax.getIndex ix) &
+                Syntax.typemSpans (Syntax.varSpan Syntax.indexSpan Syntax.voidSpan) .~
+                sp
+             )
+             absurd
+          )
           body
           retTy'
       tyArgKinds' <- traverse (fmap (IR.substKMeta (const KType)) . solveKMetas) tyArgKinds

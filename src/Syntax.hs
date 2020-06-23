@@ -12,6 +12,7 @@ import Bound.Var (Var(..), unvar)
 import Control.Lens.Getter ((^.))
 import Control.Lens.Lens (Lens', lens)
 import Control.Lens.Setter ((.~))
+import Control.Lens.Traversal (Traversal')
 import Control.Monad (ap)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Data.Deriving (deriveEq1, deriveShow1)
@@ -90,6 +91,17 @@ instance Ord a => Ord (Type a) where
   -- compare _ TName{} = GT
 instance Show a => Show (Type a) where; showsPrec = showsPrec1
 
+typeSpans :: forall a. Traversal' a Span -> Traversal' (Type a) Span
+typeSpans as f t =
+  case t of
+    TVar a -> TVar <$> as f a
+    TApp sp a b -> TApp <$> f sp <*> typeSpans as f a <*> typeSpans as f b
+    TInt32 sp -> TInt32 <$> f sp
+    TBool sp -> TBool <$> f sp
+    TPtr sp -> TPtr <$> f sp
+    TFun sp a -> TFun <$> f sp <*> (traverse.typeSpans as) f a
+    TName sp a -> (\sp' -> TName sp' a) <$> f sp
+
 typeSpan :: forall a. Lens' a Span -> Lens' (Type a) Span
 typeSpan as = lens get set
   where
@@ -159,6 +171,15 @@ typemSpan as = lens get set
 
     set :: TypeM a -> Span -> TypeM a
     set t sp' = TypeM $ unTypeM t & typeSpan (eitherTMetaSpan as) .~ sp'
+
+eitherTMetaSpans :: forall a. Traversal' a Span -> Traversal' (Either TMeta a) Span
+eitherTMetaSpans as f e =
+  case e of
+    Left (TMeta sp v) -> (\sp' -> Left $ TMeta sp' v) <$> f sp
+    Right a -> Right <$> as f a
+
+typemSpans :: Traversal' a Span -> Traversal' (TypeM a) Span
+typemSpans as f = fmap TypeM . typeSpans (eitherTMetaSpans as) f . unTypeM
 
 pattern TypeM :: Type (Either TMeta ty) -> TypeM ty
 pattern TypeM a = ExceptT a

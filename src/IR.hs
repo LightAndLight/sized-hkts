@@ -7,10 +7,11 @@
 module IR where
 
 import Bound.Var (Var(..), unvar)
-import Control.Lens.Setter (over, mapped)
+import Control.Lens.Setter ((.~), over, mapped)
 import Control.Lens.Tuple (_1)
 import Data.Bifunctor (bimap, first)
 import Data.Deriving (deriveEq1, deriveShow1, deriveEq2, deriveShow2)
+import Data.Function ((&))
 import Data.Functor.Classes (Eq1(..), Show1(..), Eq2(..), Show2(..), eq1, showsPrec1)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -24,7 +25,7 @@ import Data.Word (Word8, Word64)
 import Data.Int (Int32)
 import qualified Data.Text.Read as Text (decimal)
 
-import Syntax (Index(..), Span(..), Type(..), prettyType)
+import Syntax (Index(..), Span(..), Type(..), prettyType, typeSpans, varSpan, indexSpan, voidSpan)
 
 data Projection
   = Numeric Word64
@@ -209,7 +210,7 @@ data Constructor
   { ctorName :: Text
   , ctorSort :: CtorSort
   , ctorTyArgs :: Vector (Text, Kind)
-  , ctorArgs :: Vector (Maybe Text, Type (Var Index Void)) {- TODO: make this depend on span -}
+  , ctorArgs :: Vector (Maybe Text, Span -> Type (Var Index Void))
   , ctorRetTy :: Span -> Type (Var Index Void)
   }
 
@@ -296,7 +297,7 @@ datatypeConstructors adt =
         { ctorName = name
         , ctorSort = StructCtor
         , ctorTyArgs = params
-        , ctorArgs = fields
+        , ctorArgs = fmap (\t sp -> t & typeSpans (varSpan indexSpan voidSpan) .~ sp) <$> fields
         , ctorRetTy =
             \sp ->
             foldl @[]
@@ -318,7 +319,7 @@ datatypeConstructors adt =
           { ctorName = cn
           , ctorSort = EnumCtor tag
           , ctorTyArgs = params
-          , ctorArgs = fields
+          , ctorArgs = fmap (\t sp -> t & typeSpans (varSpan indexSpan voidSpan) .~ sp) <$> fields
           , ctorRetTy = retTy
           }
         ) <$>
@@ -330,7 +331,7 @@ constructorToTypeScheme (Constructor _ _ tyArgs args retTy) =
   { schemeOrigin = OConstructor
   , schemeTyArgs = tyArgs
   , schemeConstraints = []
-  , schemeArgs = args
+  , schemeArgs = fmap ($ Unknown) <$> args {- TODO: make these depend on instantiation span? -}
   , schemeRetTy = retTy {- TODO -} Unknown
   }
 
