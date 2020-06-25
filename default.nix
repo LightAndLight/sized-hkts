@@ -1,12 +1,12 @@
 { system ? builtins.currentSystem }:
-(import ./reflex-platform { inherit system; }).project ({ pkgs, ... }: {
+(import ./reflex-platform { inherit system; useTextJSString = false; }).project ({ pkgs, ... }: {
   overrides = self: super: {
     diagnostica = self.callCabal2nix "diagnostica" (
       pkgs.fetchFromGitHub {
         owner = "LightAndLight";
         repo = "diagnostica";
-        rev = "af0cd4cde27d0b491631cd028bebe7da8c87fe5e";
-        sha256 = "19cc9fmn6970dsrj8xan3grzl0pqmh7c59rschli37b4dchz1kcf";
+        rev = "3401509dab8c42d1458d20a48d747fd8ca66bf3a";
+        sha256 = "0pvhvnvkl34m5mg8rxrhlb3sfqs9mdjqjqhk6cpxn6hbixz7adlf";
       }
     ) {};
     diagnostica-sage = self.callCabal2nix "diagnostica-sage" (
@@ -21,8 +21,8 @@
       pkgs.fetchFromGitHub {
         owner = "LightAndLight";
         repo = "sage";
-        rev = "f6d8ac89be98e046c782172904a0989a90a17bd4";
-        sha256 = "0x8198bm75ay9mwh3l3yyq2wpxjxjdchyi2ij0gf4h2m40507m80";
+        rev = "8236d4dd39ddf58371e8cb70509a9d1324b110eb";
+        sha256 = "0bxxhl8hj6c6yzqazsza7nw2pck22z180b5bjsg9hi1k24h6g1xv";
       }
     ) {};
   };
