@@ -1,0 +1,1 @@
+function widget(id, val) { return widget_(id, val) }

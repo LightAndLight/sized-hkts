@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Widget Test</title>
+        <script language="javascript" src="./lib/rts.js"></script>
+        <script language="javascript" src="./lib/lib.js"></script>
+        <script language="javascript" src="./lib/out.js"></script>
+    </head>
+    <body>
+        <div id="hello"></div>
+        <div id="goodbye"></div>
+    </body>
+    <script type="text/javascript">
+     (async () => {
+         await import("./lib/runmain.js");
+         await new Promise(resolve => setTimeout(resolve, 1));
+         widget("hello", "hello");
+         widget("goodbye", "goodbye");
+     })()
+    </script>
+</html>
