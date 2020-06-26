@@ -15,28 +15,28 @@ parserTests =
   describe "parser" $ do
     describe "expr" $ do
       it "x" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "x" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "x" `shouldBe`
           Right (Name (Known $ Span 0 1) "x")
       it "true" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "true" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "true" `shouldBe`
           Right (BTrue (Known $ Span 0 4))
       it "false" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "false" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "false" `shouldBe`
           Right (BFalse (Known $ Span 0 5))
       it "1234" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "1234" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "1234" `shouldBe`
           Right (Number (Known $ Span 0 4) 1234)
       it "-1234" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "-12345" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "-12345" `shouldBe`
           Right (Number (Known $ Span 0 6) (-12345))
       it "hello" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "hello" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "hello" `shouldBe`
           Right (Name (Known $ Span 0 5) "hello")
       it "f()" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "f()" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "f()" `shouldBe`
           Right (Call (Known $ Span 0 3) (Name (Known $ Span 0 1) "f") [])
       it "f(a, b)" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "f(a, b)" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "f(a, b)" `shouldBe`
           Right
             (Call
               (Known $ Span 0 7)
@@ -44,25 +44,25 @@ parserTests =
               [Name (Known $ Span 2 1) "a", Name (Known $ Span 5 1) "b"]
             )
       it "x.y" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "x.y" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "x.y" `shouldBe`
           Right (Project (Known $ Span 0 3) (Name (Known $ Span 0 1) "x") "y")
       it "x.0" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "x.0" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "x.0" `shouldBe`
           Right (Project (Known $ Span 0 3) (Name (Known $ Span 0 1) "x") "0")
       it "*x" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "*x" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "*x" `shouldBe`
           Right (Deref (Known $ Span 0 2) (Name (Known $ Span 1 1) "x"))
       it "**x" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "**x" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "**x" `shouldBe`
           Right (Deref (Known $ Span 0 3) $ Deref (Known $ Span 1 2) $ Name (Known $ Span 2 1) "x")
       it "new[0]" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "new[0]" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "new[0]" `shouldBe`
           Right (New (Known $ Span 0 6) (Number (Known $ Span 4 1) 0))
       it "*new[0]" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "*new[0]" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "*new[0]" `shouldBe`
           Right (Deref (Known $ Span 0 7) $ New (Known $ Span 1 6) (Number (Known $ Span 5 1) 0))
       it "match x { Left(e) => e(1), Right(a) => 1 }" $ do
-        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "match x { Left(e) => e(1), Right(a) => 1 }" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (expr <* eof) "match x { Left(e) => e(1), Right(a) => 1 }" `shouldBe`
           Right
             (Match (Known $ Span 0 42)
               (Name (Known $ Span 6 1) "x")
@@ -74,10 +74,10 @@ parserTests =
             )
     describe "type" $ do
       it "x" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "x" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "x" `shouldBe`
           Right (TName (Known $ Span 0 1) "x")
       it "x y z" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "x y z" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "x y z" `shouldBe`
           Right
           (TApp
             (Known $ Span 0 5)
@@ -88,19 +88,19 @@ parserTests =
             (TName (Known $ Span 4 1) "z")
           )
       it "int32" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "int32" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "int32" `shouldBe`
           Right (TInt32 (Known $ Span 0 5))
       it "bool" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "bool" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "bool" `shouldBe`
           Right (TBool (Known $ Span 0 4))
       it "ptr a" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "ptr a" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "ptr a" `shouldBe`
           Right (TApp (Known $ Span 0 5) (TPtr (Known $ Span 0 3)) (TName (Known $ Span 4 1) "a"))
       it "fun(a, bool)" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "fun(a, bool)" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "fun(a, bool)" `shouldBe`
           Right (TFun (Known $ Span 0 12) [TName (Known $ Span 4 1) "a", TBool (Known $ Span 7 4)])
       it "fun(a, bool) int32" $ do
-        parse (type_ (\_ _ -> Nothing :: Maybe Void) <* eof) "fun(a, bool) int32" `shouldBe`
+        (\e -> e (\_ _ -> Nothing :: Maybe Void)) <$> parse (type_ <* eof) "fun(a, bool) int32" `shouldBe`
           Right
           (TApp (Known $ Span 0 18)
             (TFun (Known $ Span 0 12) [TName (Known $ Span 4 1) "a", TBool (Known $ Span 7 4)])
