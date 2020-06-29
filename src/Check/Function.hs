@@ -12,7 +12,7 @@ import Control.Lens.Setter ((.~))
 import Control.Monad.Except (MonadError)
 import Control.Monad.State.Strict (evalStateT)
 import Data.Bifunctor (first)
-import Data.Foldable (foldlM, foldrM, traverse_)
+import Data.Foldable (foldrM, traverse_)
 import Data.Function ((&))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -105,17 +105,8 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
       constraints <- do
         reqs <- use requiredConstraints
         global <- use globalTheory
-        local <- do
-          -- locally, we assume each argument is sized
-          argConstraints <-
-            foldlM
-            (\acc t -> do
-               m <- freshSMeta
-               pure $ Map.insert (IR.CSized $ unTypeM t) m acc
-            )
-            mempty
-            args'
-          -- and each type variable is sized
+        local <-
+          -- locally, we assume that each type variable is sized
           ifoldlM
             (\ix acc k -> do
                m <- freshSMeta
@@ -125,7 +116,7 @@ checkFunction glbl fields ctors kindScope tyScope (Syntax.Function name tyArgs a
                    m
                    acc
             )
-            argConstraints
+            mempty
             tyArgKinds'
         reqsAndRet <-
           foldrM
