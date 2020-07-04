@@ -21,11 +21,11 @@ where
 
 import Bound.Var (unvar)
 import Control.Lens.Getter (use, uses)
-import Control.Lens.Setter ((.=), (%=))
+import Control.Lens.Setter ((.=), (%=), (<>=))
 import Control.Lens.TH (makeLenses)
 import Control.Monad.State.Strict (MonadState, evalStateT)
 import Control.Monad.Writer.Strict (WriterT, runWriterT, tell)
-import Data.Foldable (fold, foldrM, traverse_)
+import Data.Foldable (fold, traverse_)
 import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -55,10 +55,8 @@ data Code
   , _codeDeclarations :: Map (IR.Origin, Text) IR.Declaration
   , _codeGlobalTheory :: Map (IR.Constraint Void) (Size Void)
   , _codeDatatypeCtors :: Map Text IR.Constructor
-  , _codeCompiledNames ::
-      Map
-        Key -- (IR.Origin, Text, Vector (Syntax.Type Void))
-        (Text, Maybe [CDecl]) -- 'Nothing' indicates that this code is currently being compiled
+  , _codeCompiledNames :: Map Key Text
+  , _codeCompiled :: [CDecl]
   , _codeSupply :: Int
   }
 makeLenses ''Code
@@ -71,6 +69,7 @@ emptyCode =
   , _codeGlobalTheory = mempty
   , _codeDatatypeCtors = mempty
   , _codeCompiledNames = mempty
+  , _codeCompiled = mempty
   , _codeSupply = 0
   }
 
@@ -121,7 +120,7 @@ genType ty =
             Nothing -> do
               let realName = name <> typeSuffix ts <> "_t"
               m_decl <- uses codeDeclarations $ Map.lookup (IR.ODatatype, name)
-              codeCompiledNames %= Map.insert key (realName, Nothing)
+              codeCompiledNames %= Map.insert key realName
               code <-
                 case m_decl of
                   Nothing -> error $ "genType: " <> show name <> " not found"
@@ -130,9 +129,9 @@ genType ty =
                       IR.DData adt -> genDatatype adt ts
                       IR.DFunc{} -> error $ "genType: got Func"
                       IR.DCtor{} -> error $ "genInst: got Ctor"
-              codeCompiledNames %= Map.insert key (realName, Just code)
+              codeCompiled <>= code
               pure realName
-            Just (realName, _) -> pure realName
+            Just realName -> pure realName
         pure $ C.Name name'
       _ -> error $ "genType: bad type " <> show ty
 
@@ -173,14 +172,9 @@ genDatatype adt ts =
       unionMembers <-
         traverse
           (\(cname, cty) ->
-             case Vector.length cty of
-               0 -> pure (C.TStruct [], cname)
-               1 | (Nothing, ctyTy) <- cty Vector.! 0 -> do
-                 (,) <$> genType ctyTy <*> pure cname
-               _ ->
-                 (,) . C.TStruct <$>
-                 traverse (\(n, t) -> (,) <$> genType t <*> pure n) (nameFields cty) <*>
-                 pure cname
+            (,) . C.TStruct <$>
+            traverse (\(n, t) -> (,) <$> genType t <*> pure n) (nameFields cty) <*>
+            pure cname
           )
           ctors_inst
       pure
@@ -227,7 +221,7 @@ genInst name ts = do
     case m_code of
       Nothing -> do
         let realName = name <> typeSuffix ts
-        codeCompiledNames %= Map.insert key (realName, Nothing)
+        codeCompiledNames %= Map.insert key realName
         code <- do
           m_decl <- uses codeDeclarations $ Map.lookup (IR.OFunction, name)
           case m_decl of
@@ -237,9 +231,9 @@ genInst name ts = do
                 IR.DFunc func -> genFunction func ts
                 IR.DData{} -> error $ "genInst: got Data"
                 IR.DCtor{} -> error $ "genInst: got Ctor"
-        codeCompiledNames %= Map.insert key (realName, Just [code])
+        codeCompiled <>= [code]
         pure realName
-      Just (realName, _) -> pure realName
+      Just realName -> pure realName
   pure $ C.Var name'
 
 genCtor ::
@@ -255,7 +249,7 @@ genCtor name ts = do
     case m_code of
       Nothing -> do
         let realName = "make_" <> name <> typeSuffix ts
-        codeCompiledNames %= Map.insert key (realName, Nothing)
+        codeCompiledNames %= Map.insert key realName
         code <- do
           m_decl <- uses codeDeclarations $ Map.lookup (IR.OConstructor, name)
           case m_decl of
@@ -265,9 +259,9 @@ genCtor name ts = do
                 IR.DFunc{} -> error $ "genCtor: got Func"
                 IR.DCtor ctor -> genConstructor ctor ts
                 IR.DData{} -> error $ "genCtor: got Data"
-        codeCompiledNames %= Map.insert key (realName, Just [code])
+        codeCompiled <>= [code]
         pure realName
-      Just (realName, _) -> pure realName
+      Just realName -> pure realName
   pure $ C.Var name'
 
 sizeOfType ::
@@ -481,13 +475,4 @@ genFunction (IR.Function name tyArgs _constraints args retTy body) tyArgs' =
            traverse (\(n, t) -> (,) <$> genType t <*> pure n) args_inst
 
 genDecls :: MonadState Code m => m [CDecl]
-genDecls = do
-  names <- uses codeCompiledNames Map.toList
-  foldrM
-    (\(n, (_, m_decl)) rest ->
-       case m_decl of
-         Nothing -> error $ "genDecls: no decl for " <> show n
-         Just decls -> pure $ decls <> rest
-    )
-    []
-    names
+genDecls = use codeCompiled
