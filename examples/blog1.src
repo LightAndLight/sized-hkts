@@ -1,0 +1,31 @@
+enum ListF f a { Nil(), Cons(f a, ptr (ListF f a)) }
+enum Maybe a { Nothing(), Just(a) }
+struct Identity a = Identity(a)
+
+fn validate<a>(xs: ListF Maybe a) -> Maybe (ListF Identity a) {
+  match xs {
+    Nil() => Just(Nil()),
+    Cons(mx, rest) => match mx {
+      Nothing() => Nothing(),
+      Just(x) => match validate(*rest) {
+        Nothing() => Nothing(),
+        Just(nextRest) => Just(Cons(Identity(x), new[nextRest]))
+      }
+    }
+  }
+}
+
+fn main() -> int32 {
+  let
+    a = Nil();
+    b = Cons(Nothing(), new[a]);
+    c = Cons(Just(1), new[b])
+  in
+    match validate(c) {
+      Nothing() => 11,
+      Just(xs) => match xs {
+        Nil() => 22,
+        Cons(x, rest) => x.0
+      }
+    }
+}

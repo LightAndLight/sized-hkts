@@ -60,8 +60,20 @@ ident = Parser.takeWhile1 (Parser.pLower <> Parser.pUpper) <?> "identifier"
 expr :: forall s a. (Parser.Span -> Text -> Maybe a) -> Parser s (Expr a)
 expr abstract =
   match <|>
+  let_ <|>
   deref
   where
+    let_ =
+      (\bs e -> Let (Vector.fromList bs) e) <$ Parser.symbol "let" <* newlines <*>
+      Parser.sepBy
+        ((,) <$>
+        ident <* Parser.between spaces spaces (Parser.char '=') <*>
+        expr abstract
+        )
+        (Parser.char ';' <* newlines) <*
+        Parser.between newlines newlines (Parser.symbol "in") <*>
+      expr abstract
+
     bool :: Parser s (Expr a)
     bool =
       (\(sp, _) -> BTrue $ Known sp) <$> Parser.spanned (Parser.symbol "true") <* spaces <|>
@@ -146,10 +158,9 @@ type_ abstract = snd <$> self
       (\(sp, ts) -> TFun (Known sp) $ Vector.fromList ts) <$>
       Parser.spanned
         (Parser.symbol "fun" *>
-         parens (Parser.sepBy (type_ abstract) (Parser.char ',' <* spaces)) <*
-         spaces
-        ) <|>
-      parens (type_ abstract) <|>
+         parens (Parser.sepBy (type_ abstract) (Parser.char ',' <* spaces))
+        ) <* spaces <|>
+      parens (type_ abstract) <* spaces <|>
       (\(sp, i) -> maybe (TName (Known sp) i) TVar $ abstract sp i) <$> Parser.spanned ident <* spaces
 
     app =
@@ -226,5 +237,4 @@ declaration =
   DFunc <$> function
 
 declarations :: Parser s [Declaration]
-declarations =
-  Parser.sepBy declaration newlines
+declarations = newlines *> many (declaration <* newlines)
