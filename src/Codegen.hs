@@ -320,6 +320,7 @@ genExpr vars expr = do
       bs' <- traverse (genExpr vars) bs
       pure $ C.Call a' bs'
     IR.Int32 n -> pure . C.Number $ fromIntegral n
+    IR.Add a b -> C.Plus <$> genExpr vars a <*> genExpr vars b
     IR.BTrue -> pure C.BTrue
     IR.BFalse -> pure C.BFalse
     IR.New a t -> do

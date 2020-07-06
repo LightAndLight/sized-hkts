@@ -274,10 +274,11 @@ data Expr a
   = Var a
   | Name !Span Text
 
-  | Let (Vector (Text, Expr a)) (Expr a)
+  | Let !Span (Vector (Text, Expr a)) (Expr a)
   | Call !Span (Expr a) (Vector (Expr a))
 
   | Number !Span Integer
+  | Add !Span (Expr a) (Expr a)
 
   | BTrue !Span
   | BFalse !Span
@@ -298,6 +299,41 @@ deriveShow1 ''Expr
 instance Eq a => Eq (Expr a) where; (==) = eq1
 instance Show a => Show (Expr a) where; showsPrec = showsPrec1
 
+exprSpan :: forall a. Lens' a Span -> Lens' (Expr a) Span
+exprSpan l = lens get set
+  where
+    get :: Expr a -> Span
+    get e =
+      case e of
+        Var a -> a ^. l
+        Name sp _ -> sp
+        Let sp _ _ -> sp
+        Call sp _ _ -> sp
+        Number sp _ -> sp
+        Add sp _ _ -> sp
+        BTrue sp -> sp
+        BFalse sp -> sp
+        New sp _ -> sp
+        Deref sp _ -> sp
+        Project sp _ _ -> sp
+        Match sp _ _ -> sp
+
+    set :: Expr a -> Span -> Expr a
+    set e sp' =
+      case e of
+        Var a -> Var (a & l .~ sp')
+        Name _ a -> Name sp' a
+        Let _ a b -> Let sp' a b
+        Call _ a b -> Call sp' a b
+        Number _ a -> Number sp' a
+        Add _ a b -> Add sp' a b
+        BTrue _ -> BTrue sp'
+        BFalse _ -> BFalse sp'
+        New _ a -> New sp' a
+        Deref _ a -> Deref sp' a
+        Project _ a b -> Project sp' a b
+        Match _ a b -> Match sp' a b
+
 bindExpr_Case :: (a -> Expr b) -> Case a -> Case b
 bindExpr_Case f (Case sp name args e) = Case sp name args (e >>= unvar (Var . B) (fmap F . f))
 
@@ -307,9 +343,10 @@ instance Monad Expr where
     case expr of
       Var a -> f a
       Name sp n -> Name sp n
-      Let es b -> Let ((\(n, e) -> (n, e >>= f)) <$> es) (b >>= f)
+      Let sp es b -> Let sp ((\(n, e) -> (n, e >>= f)) <$> es) (b >>= f)
       Call sp a args -> Call sp (a >>= f) ((>>= f) <$> args)
       Number sp n -> Number sp n
+      Add sp a b -> Add sp (a >>= f) (b >>= f)
       BTrue sp -> BTrue sp
       BFalse sp -> BFalse sp
       New sp v -> New sp (v >>= f)

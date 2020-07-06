@@ -143,6 +143,7 @@ solveTMetas_Expr = go
           traverse go args <*>
           solveTMetas_Type id t
         IR.Int32 n -> pure $ IR.Int32 n
+        IR.Add a b -> IR.Add <$> go a <*> go b
         IR.BTrue -> pure $ IR.BTrue
         IR.BFalse -> pure $ IR.BFalse
         IR.New a t -> IR.New <$> go a <*> solveTMetas_Type id t

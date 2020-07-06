@@ -16,7 +16,7 @@ module Check.Type
 where
 
 import Bound.Var (unvar)
-import Control.Lens.Getter (view)
+import Control.Lens.Getter ((^.), view)
 import Control.Lens.Lens (Lens')
 import Control.Lens.Setter ((<>=) )
 import Control.Monad.Except (MonadError, throwError)
@@ -180,7 +180,40 @@ inferExpr kindScope tyScope letScope tySpans tmSpans tyNames tmNames kinds types
         }
       else throwError $ OutOfBoundsInt32 sp
 
-    Syntax.Let bindings body -> do
+    Syntax.Add sp a b -> do
+      aResult <-
+        checkExpr
+          kindScope
+          tyScope
+          letScope
+          tySpans
+          tmSpans
+          tyNames
+          tmNames
+          kinds
+          types
+          a
+          (TypeM $ Syntax.TInt32 $ a ^. Syntax.exprSpan tmSpans)
+      bResult <-
+        checkExpr
+          kindScope
+          tyScope
+          letScope
+          tySpans
+          tmSpans
+          tyNames
+          tmNames
+          kinds
+          types
+          b
+          (TypeM $ Syntax.TInt32 $ b ^. Syntax.exprSpan tmSpans)
+      pure $
+        InferResult
+        { irExpr = IR.Add (crExpr aResult) (crExpr bResult)
+        , irType = TypeM $ Syntax.TInt32 sp
+        }
+
+    Syntax.Let _ bindings body -> do
       (letScope', bindings') <-
         foldlM
           (\(acc, bs) (n, b) -> do
@@ -412,6 +445,7 @@ zonkExprTypes e =
       traverse zonkExprTypes args <*>
       traverse (either (error . ("zonking found: " <>) . show) pure) t
     IR.Int32 n -> pure $ IR.Int32 n
+    IR.Add a b -> IR.Add <$> zonkExprTypes a <*> zonkExprTypes b
     IR.BTrue -> pure $ IR.BTrue
     IR.BFalse -> pure $ IR.BFalse
     IR.New a t ->

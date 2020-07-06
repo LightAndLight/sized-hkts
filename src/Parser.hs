@@ -61,30 +61,34 @@ expr :: forall s a. (Parser.Span -> Text -> Maybe a) -> Parser s (Expr a)
 expr abstract =
   match <|>
   let_ <|>
-  deref
+  simple
   where
     let_ =
-      (\bs e -> Let (Vector.fromList bs) e) <$ Parser.symbol "let" <* newlines <*>
-      Parser.sepBy
-        ((,) <$>
-        ident <* Parser.between spaces spaces (Parser.char '=') <*>
-        expr abstract
-        )
-        (Parser.char ';' <* newlines) <*
-        Parser.between newlines newlines (Parser.symbol "in") <*>
-      expr abstract
-
-    bool :: Parser s (Expr a)
-    bool =
-      (\(sp, _) -> BTrue $ Known sp) <$> Parser.spanned (Parser.symbol "true") <* spaces <|>
-      (\(sp, _) -> BFalse $ Known sp) <$> Parser.spanned (Parser.symbol "false") <* spaces
-
-    new =
-      (\(sp, e) -> New (Known sp) e) <$>
+      (\(sp, (bs, e)) -> Let (Known sp) (Vector.fromList bs) e) <$>
       Parser.spanned
-      (Parser.symbol "new" *> Parser.char '[' *>
-       expr abstract <* Parser.char ']'
-      ) <* spaces
+        ((,) <$ Parser.symbol "let" <* newlines <*>
+         Parser.sepBy
+           ((,) <$>
+           ident <* Parser.between spaces spaces (Parser.char '=') <*>
+           expr abstract
+           )
+           (Parser.char ';' <* newlines) <*
+           Parser.between newlines newlines (Parser.symbol "in") <*>
+         expr abstract
+        )
+
+    simple = add
+
+    add =
+      fmap snd $
+      foldl
+        (\(spl, l) (spr, r) -> let sp = spl <> spr in (sp, Add (Known sp) l r)) <$>
+        Parser.spanned deref <* spaces <*>
+        many (Parser.char '+' *> spaces *> Parser.spanned deref <* spaces)
+
+    deref =
+      (\(sp, e) -> Deref (Known sp) e) <$> Parser.spanned (Parser.char '*' *> deref) <|>
+      projectOrCall
 
     field =
       Parser.takeWhile1 Parser.pDigit <|>
@@ -103,28 +107,36 @@ expr abstract =
        (,) <$>
        atom <*>
        many
-         (Left <$ Parser.char '.' <*> field <* spaces <|>
-          Right <$> args <* spaces
+         (Left <$ Parser.char '.' <*> field <|>
+          Right <$> args
          )
       )
 
-    deref =
-      (\(sp, e) -> Deref (Known sp) e) <$> Parser.spanned (Parser.char '*' *> deref) <|>
-      projectOrCall
+    bool :: Parser s (Expr a)
+    bool =
+      (\(sp, _) -> BTrue $ Known sp) <$> Parser.spanned (Parser.symbol "true") <|>
+      (\(sp, _) -> BFalse $ Known sp) <$> Parser.spanned (Parser.symbol "false")
+
+    new =
+      (\(sp, e) -> New (Known sp) e) <$>
+      Parser.spanned
+      (Parser.symbol "new" *> Parser.char '[' *>
+       expr abstract <* Parser.char ']'
+      )
 
     number =
       (\(sp, x) -> Number (Known sp) x) <$>
       (Parser.spanned $
        (negate <$ Parser.char '-' <|> pure id) <*>
        Parser.decimal
-      ) <* spaces
+      )
 
     atom =
       bool <|>
       new <|>
       number <|>
-      (\(sp, i) -> maybe (Name (Known sp) i) Var $ abstract sp i) <$> Parser.spanned ident <* spaces <|>
-      parens (expr abstract) <* spaces
+      (\(sp, i) -> maybe (Name (Known sp) i) Var $ abstract sp i) <$> Parser.spanned ident <|>
+      parens (expr abstract)
 
     case_ = do
       (sp, (c, as)) <-
@@ -138,7 +150,7 @@ expr abstract =
       (\(sp, (e, bs)) -> Match (Known sp) e bs) <$>
       (Parser.spanned $
        (,) <$ Parser.symbol "match" <* spaces <*>
-       deref <* spaces <*>
+       simple <* spaces <*>
        Parser.between
          (Parser.char '{' *> newlines)
          (newlines *> Parser.char '}')

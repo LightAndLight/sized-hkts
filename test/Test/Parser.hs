@@ -29,6 +29,18 @@ parserTests =
       it "-1234" $ do
         parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "-12345" `shouldBe`
           Right (Number (Known $ Span 0 6) (-12345))
+      it "1 + 2 + 3" $ do
+        parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "1 + 2 + 3" `shouldBe`
+          Right
+            (Add
+              (Known $ Span 0 9)
+              (Add
+                (Known $ Span 0 5)
+                (Number (Known $ Span 0 1) 1)
+                (Number (Known $ Span 4 1) 2)
+              )
+              (Number (Known $ Span 8 1) 3)
+            )
       it "hello" $ do
         parse (expr (\_ _ -> Nothing :: Maybe Void) <* eof) "hello" `shouldBe`
           Right (Name (Known $ Span 0 5) "hello")

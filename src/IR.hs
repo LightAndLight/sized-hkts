@@ -55,6 +55,7 @@ data Expr ty tm
   | Call (Expr ty tm) (Vector (Expr ty tm)) (Type ty)
 
   | Int32 Int32
+  | Add (Expr ty tm) (Expr ty tm)
 
   | BTrue
   | BFalse
@@ -97,6 +98,7 @@ bindType_Expr f e =
     Call a bs t ->
       Call (bindType_Expr f a) (bindType_Expr f <$> bs) (t >>= f)
     Int32 ws -> Int32 ws
+    Add a b -> Add (bindType_Expr f a) (bindType_Expr f b)
     BTrue -> BTrue
     BFalse -> BFalse
     New a t -> New (bindType_Expr f a) (t >>= f)

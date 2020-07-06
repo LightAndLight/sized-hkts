@@ -473,6 +473,7 @@ main =
               , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
+                    Unknown
                     [("x", Syntax.New Unknown $ Syntax.Number Unknown 26)]
                     (Syntax.Deref Unknown $ Syntax.Name Unknown "x")
               }
@@ -512,6 +513,7 @@ main =
               , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
+                    Unknown
                     [ ( "x"
                       , Syntax.Call Unknown
                           (Syntax.Name Unknown "Pair")
@@ -571,6 +573,7 @@ main =
               , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
+                    Unknown
                     [ ( "x"
                       , Syntax.Call Unknown
                           (Syntax.Name Unknown "Pair")
@@ -633,6 +636,7 @@ main =
               , Syntax.funcRetTy = TInt32 Unknown
               , Syntax.funcBody =
                   Syntax.Let
+                    Unknown
                     [("x", Syntax.Call Unknown (Syntax.Name Unknown "Nil") [])]
                     (Syntax.Number Unknown 0)
               }
