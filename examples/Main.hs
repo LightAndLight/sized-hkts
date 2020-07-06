@@ -15,14 +15,20 @@ import qualified Compile
 
 main :: IO ()
 main =
-  Directory.withCurrentDirectory "examples" $ do
-    files <- Directory.listDirectory "."
-    for_ files $ \file ->
-      when (FilePath.takeExtension file == ".src") $ do
-        contents <- Text.readFile file
-        let
-          output =
-            case Compile.parseAndCompile (Text.pack file) contents of
-              Left err -> err
-              Right res -> Pretty.displayT $ Pretty.renderPretty 1.0 100 (C.prettyCDecls res)
-        Lazy.writeFile (FilePath.dropExtension file <.> "out") output
+  let
+    examplesDir = "examples"
+  in
+    Directory.withCurrentDirectory examplesDir $ do
+      files <- Directory.listDirectory "."
+      for_ files $ \file ->
+        case FilePath.takeExtension file of
+          ".out" -> Directory.removeFile file
+          ".src" -> do
+            contents <- Text.readFile file
+            let
+              output =
+                case Compile.parseAndCompile (Text.pack file) contents of
+                  Left err -> err
+                  Right res -> Pretty.displayT $ Pretty.renderPretty 1.0 100 (C.prettyCDecls res)
+            Lazy.writeFile (FilePath.dropExtension file <.> "out") output
+          _ -> pure ()

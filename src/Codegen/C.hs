@@ -150,8 +150,8 @@ prettyCType t =
   case t of
     Ptr a -> prettyCType a <> " *"
     FunPtr ret args ->
-      Pretty.parens (prettyCType ret) <>
-      "*" <>
+      prettyCType ret <>
+      Pretty.parens "*" <>
       Pretty.parens (intersperseMap ", " prettyCType args)
     Void m_ann  ->
       "void" <>
@@ -165,7 +165,7 @@ prettyCType t =
       Pretty.braces
         (" " <>
          foldMap
-           (\(ft, fn) -> prettyCType ft <> " " <> Pretty.textStrict fn <> "; ")
+           (\(ft, fn) -> prettyNamedCType fn ft <> "; ")
            fs
         )
     Union vs ->
@@ -174,21 +174,26 @@ prettyCType t =
       Pretty.indent 4
         (Pretty.vsep . Vector.toList $
          fmap
-           (\(vt, vn) ->
-              prettyCType vt <> " " <>
-              Pretty.textStrict vn <> ";"
-           )
+           (\(vt, vn) -> prettyNamedCType vn vt <> ";")
            vs
         ) Pretty.<$>
       Pretty.rbrace
+
+prettyNamedCType :: Text -> CType -> Doc
+prettyNamedCType n t =
+  case t of
+    FunPtr ret args ->
+      prettyCType ret <>
+      Pretty.parens ("*" <> Pretty.textStrict n) <>
+      Pretty.parens (intersperseMap ", " prettyCType args)
+    _ -> Pretty.hsep [prettyCType t, Pretty.textStrict n]
 
 prettyCStatement :: CStatement -> Doc
 prettyCStatement s =
   case s of
     Return e -> "return " <> prettyCExpr e
     Declare t n e ->
-      prettyCType t <> " " <>
-      Pretty.textStrict n <>
+      prettyNamedCType n t <>
       foldMap ((" = " <>) . prettyCExpr) e
     Assign l r -> prettyCExpr l <> " = " <> prettyCExpr r
     If cond ss ->
@@ -210,7 +215,7 @@ prettyCDecl d =
         (intersperseMap
           ", "
           (\(argTy, argName) ->
-            prettyCType argTy <> " " <> Pretty.textStrict argName
+            prettyNamedCType argName argTy
           )
           args
         ) <>
@@ -229,7 +234,7 @@ prettyCDecl d =
       Pretty.indent 4
         (Pretty.vsep . Vector.toList $
          fmap
-           (\(ft, fn) -> prettyCType ft <> " " <> Pretty.textStrict fn <> ";")
+           (\(ft, fn) -> prettyNamedCType fn ft <> ";")
            fs
         ) Pretty.<$>
       Pretty.rbrace

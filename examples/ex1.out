@@ -1,0 +1,61 @@
+#include "stdlib.h"
+#include "stdint.h"
+#include "stdbool.h"
+#include "alloca.h"
+
+typedef struct List_TInt32_t List_TInt32_t;
+
+struct List_TInt32_t {
+    uint8_t tag;
+    union {
+        struct { } Nil;
+        struct { int32_t _0; List_TInt32_t * _1; } Cons;
+    } data;
+};
+
+List_TInt32_t make_Nil_TInt32() {
+    List_TInt32_t __0 = {0, {.Nil = {}}};
+    return __0;
+}
+
+List_TInt32_t make_Cons_TInt32(int32_t __1, List_TInt32_t * __2) {
+    List_TInt32_t __3 = {1, {.Cons = {__1, __2}}};
+    return __3;
+}
+
+List_TInt32_t mapList_TInt32_TInt32(int32_t(*f)(int32_t), List_TInt32_t xs) {
+    List_TInt32_t __6 = xs;
+    List_TInt32_t __7;
+    if (__6.tag == 0) {
+        __7 = make_Nil_TInt32();
+    };
+    if (__6.tag == 1) {
+        List_TInt32_t * __8 = (List_TInt32_t *)malloc(13);
+        *__8 = mapList_TInt32_TInt32(f, *__6.data.Cons._1);
+        __7 = make_Cons_TInt32(f(__6.data.Cons._0), __8);
+    };
+    return __7;
+}
+
+int32_t plusTen(int32_t x) {
+    return x + 10;
+}
+
+int32_t main() {
+    List_TInt32_t a = make_Nil_TInt32();
+    List_TInt32_t * __4 = (List_TInt32_t *)malloc(13);
+    *__4 = a;
+    List_TInt32_t b = make_Cons_TInt32(0, __4);
+    List_TInt32_t * __5 = (List_TInt32_t *)malloc(13);
+    *__5 = b;
+    List_TInt32_t c = make_Cons_TInt32(1, __5);
+    List_TInt32_t __9 = mapList_TInt32_TInt32(plusTen, c);
+    int32_t __10;
+    if (__9.tag == 0) {
+        __10 = 0;
+    };
+    if (__9.tag == 1) {
+        __10 = __9.data.Cons._0;
+    };
+    return __10;
+}

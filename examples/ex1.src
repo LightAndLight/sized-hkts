@@ -1,8 +1,24 @@
 enum List a { Nil(), Cons(a, ptr (List a)) }
 
+fn mapList<a,b>(f: fun(a) b, xs: List a) -> List b {
+  match xs {
+    Nil() => Nil(),
+    Cons(x, rest) => Cons(f(x), new[mapList(f, *rest)])
+  }
+}
+
+fn plusTen(x: int32) -> int32 {
+  x + 10
+}
+
 fn main() -> int32 {
-  match Cons(2, new[Nil()]) {
-    Nil() => 5,
+  let
+    a = Nil();
+    b = Cons(0, new[a]);
+    c = Cons(1, new[b])
+  in
+  match mapList(plusTen, c) {
+    Nil() => 0,
     Cons(x, xs) => x
   }
 }

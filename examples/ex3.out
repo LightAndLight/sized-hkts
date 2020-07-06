@@ -1,0 +1,147 @@
+#include "stdlib.h"
+#include "stdint.h"
+#include "stdbool.h"
+#include "alloca.h"
+
+typedef struct Maybe_TInt32_t Maybe_TInt32_t;
+
+struct Maybe_TInt32_t {
+    uint8_t tag;
+    union {
+        struct { } Nothing;
+        struct { int32_t _0; } Just;
+    } data;
+};
+
+typedef struct ListF_Maybe_TInt32_t ListF_Maybe_TInt32_t;
+
+struct ListF_Maybe_TInt32_t {
+    uint8_t tag;
+    union {
+        struct { } Nil;
+        struct { Maybe_TInt32_t _0; ListF_Maybe_TInt32_t * _1; } Cons;
+    } data;
+};
+
+ListF_Maybe_TInt32_t make_Nil_Maybe_TInt32() {
+    ListF_Maybe_TInt32_t __0 = {0, {.Nil = {}}};
+    return __0;
+}
+
+ListF_Maybe_TInt32_t make_Cons_Maybe_TInt32(Maybe_TInt32_t __1, ListF_Maybe_TInt32_t * __2) {
+    ListF_Maybe_TInt32_t __3 = {1, {.Cons = {__1, __2}}};
+    return __3;
+}
+
+Maybe_TInt32_t make_Just_TInt32(int32_t __4) {
+    Maybe_TInt32_t __5 = {1, {.Just = {__4}}};
+    return __5;
+}
+
+typedef struct Identity_TInt32_t Identity_TInt32_t;
+
+struct Identity_TInt32_t {
+    int32_t _0;
+};
+
+typedef struct ListF_Identity_TInt32_t ListF_Identity_TInt32_t;
+
+struct ListF_Identity_TInt32_t {
+    uint8_t tag;
+    union {
+        struct { } Nil;
+        struct { Identity_TInt32_t _0; ListF_Identity_TInt32_t * _1; } Cons;
+    } data;
+};
+
+typedef struct Maybe_TAppTAppListFIdentityTInt32_t Maybe_TAppTAppListFIdentityTInt32_t;
+
+struct Maybe_TAppTAppListFIdentityTInt32_t {
+    uint8_t tag;
+    union {
+        struct { } Nothing;
+        struct { ListF_Identity_TInt32_t _0; } Just;
+    } data;
+};
+
+Maybe_TAppTAppListFIdentityTInt32_t make_Just_TAppTAppListFIdentityTInt32(ListF_Identity_TInt32_t __10) {
+    Maybe_TAppTAppListFIdentityTInt32_t __11 = {1, {.Just = {__10}}};
+    return __11;
+}
+
+ListF_Identity_TInt32_t make_Nil_Identity_TInt32() {
+    ListF_Identity_TInt32_t __12 = {0, {.Nil = {}}};
+    return __12;
+}
+
+Maybe_TAppTAppListFIdentityTInt32_t make_Nothing_TAppTAppListFIdentityTInt32() {
+    Maybe_TAppTAppListFIdentityTInt32_t __15 = {0, {.Nothing = {}}};
+    return __15;
+}
+
+ListF_Identity_TInt32_t make_Cons_Identity_TInt32(Identity_TInt32_t __18, ListF_Identity_TInt32_t * __19) {
+    ListF_Identity_TInt32_t __20 = {1, {.Cons = {__18, __19}}};
+    return __20;
+}
+
+Identity_TInt32_t make_Identity_TInt32(int32_t __21) {
+    Identity_TInt32_t __22 = {__21};
+    return __22;
+}
+
+Maybe_TAppTAppListFIdentityTInt32_t validate_TInt32(ListF_Maybe_TInt32_t xs) {
+    ListF_Maybe_TInt32_t __8 = xs;
+    Maybe_TAppTAppListFIdentityTInt32_t __9;
+    if (__8.tag == 0) {
+        __9 = make_Just_TAppTAppListFIdentityTInt32(make_Nil_Identity_TInt32());
+    };
+    if (__8.tag == 1) {
+        Maybe_TInt32_t __13 = __8.data.Cons._0;
+        Maybe_TAppTAppListFIdentityTInt32_t __14;
+        if (__13.tag == 0) {
+            __14 = make_Nothing_TAppTAppListFIdentityTInt32();
+        };
+        if (__13.tag == 1) {
+            Maybe_TAppTAppListFIdentityTInt32_t __16 = validate_TInt32(*__8.data.Cons._1);
+            Maybe_TAppTAppListFIdentityTInt32_t __17;
+            if (__16.tag == 0) {
+                __17 = make_Nothing_TAppTAppListFIdentityTInt32();
+            };
+            if (__16.tag == 1) {
+                ListF_Identity_TInt32_t * __23 = (ListF_Identity_TInt32_t *)malloc(13);
+                *__23 = __16.data.Just._0;
+                __17 = make_Just_TAppTAppListFIdentityTInt32(make_Cons_Identity_TInt32(make_Identity_TInt32(__13.data.Just._0), __23));
+            };
+            __14 = __17;
+        };
+        __9 = __14;
+    };
+    return __9;
+}
+
+int32_t main() {
+    ListF_Maybe_TInt32_t a = make_Nil_Maybe_TInt32();
+    ListF_Maybe_TInt32_t * __6 = (ListF_Maybe_TInt32_t *)malloc(14);
+    *__6 = a;
+    ListF_Maybe_TInt32_t b = make_Cons_Maybe_TInt32(make_Just_TInt32(2), __6);
+    ListF_Maybe_TInt32_t * __7 = (ListF_Maybe_TInt32_t *)malloc(14);
+    *__7 = b;
+    ListF_Maybe_TInt32_t c = make_Cons_Maybe_TInt32(make_Just_TInt32(1), __7);
+    Maybe_TAppTAppListFIdentityTInt32_t __24 = validate_TInt32(c);
+    int32_t __25;
+    if (__24.tag == 0) {
+        __25 = 11;
+    };
+    if (__24.tag == 1) {
+        ListF_Identity_TInt32_t __26 = __24.data.Just._0;
+        int32_t __27;
+        if (__26.tag == 0) {
+            __27 = 22;
+        };
+        if (__26.tag == 1) {
+            __27 = __26.data.Cons._0._0;
+        };
+        __25 = __27;
+    };
+    return __25;
+}
