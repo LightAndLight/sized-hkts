@@ -67,6 +67,17 @@ executable compiler
   hs-source-dirs:      compiler
   default-language:    Haskell2010
 
+executable examples
+  main-is:             Main.hs
+  build-depends:       base >=4.12.0.0 && <5
+                     , sized-hkts
+                     , directory >=1.3
+                     , filepath >=1.4
+                     , text >=1.2
+                     , wl-pprint-text
+  hs-source-dirs:      examples
+  default-language:    Haskell2010
+
 test-suite sized-hkts-test
   default-language:    Haskell2010
   type:                exitcode-stdio-1.0
